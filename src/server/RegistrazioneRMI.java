@@ -5,7 +5,6 @@ import java.rmi.RemoteException;
 
 /**
  * Interfaccia remota per il servizio di registrazione
- *
  * Gestisce la registrazione di nuovi utenti via RMI
  */
 public interface RegistrazioneRMI extends Remote {
