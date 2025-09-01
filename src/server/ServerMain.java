@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Classe Main del server CROSS
+ *
  * Implementa un server multithreaded che gestisce:
  * - Registrazioni via RMI
  * - Login e operazioni via TCP
@@ -145,16 +146,23 @@ public class ServerMain {
 
     /**
      * Avvia il server RMI per gestire le registrazioni
+     * Il RegistrazioneRMIImpl inizializzerà automaticamente il UserManager
      *
      * @param rmiPort porta su cui avviare il registry RMI
      * @throws Exception se errori durante setup RMI
      */
     private static void startRMIServer(int rmiPort) throws Exception {
 
+        // Crea l'implementazione RMI
         RegistrazioneRMIImpl rmiImpl = new RegistrazioneRMIImpl();
+
+        // Esporta l'oggetto e ottieni lo stub (pattern slide 26)
+        RegistrazioneRMI stub = (RegistrazioneRMI) java.rmi.server.UnicastRemoteObject.exportObject(rmiImpl, 0);
+
+        // Crea registry e registra lo stub
         LocateRegistry.createRegistry(rmiPort);
         Registry registry = LocateRegistry.getRegistry(rmiPort);
-        registry.rebind("server-rmi", rmiImpl);
+        registry.rebind("server-rmi", stub);
 
         System.out.println("[Server] Server RMI attivo sulla porta " + rmiPort);
     }
@@ -273,5 +281,6 @@ public class ServerMain {
         }
 
         System.out.println("[Server] Server terminato correttamente.");
+        System.exit(0);
     }
 }

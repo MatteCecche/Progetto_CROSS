@@ -1,0 +1,17 @@
+{
+  "users": [
+    {
+      "username": "Matteo",
+      "password": "123",
+      "isLoggedIn": false,
+      "registrationTimestamp": 1756716858478
+    },
+    {
+      "username": "Giorgio",
+      "password": "999",
+      "isLoggedIn": false,
+      "registrationTimestamp": 1756716877965
+    }
+  ],
+  "lastUpdated": 1756716877965
+}
