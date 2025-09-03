@@ -45,7 +45,7 @@ public class ClientMain {
 
     public static void main(String[] args) {
 
-        System.out.println("[Client] === Avvio Client CROSS ===");
+        System.out.println("[Client] ==== Avvio Client CROSS ====");
 
         // Caricamento delle configurazioni da file properties
         Properties config;
@@ -54,7 +54,7 @@ public class ClientMain {
         } catch (IOException e) {
             System.err.println("[Client] Impossibile caricare configurazione: " + e.getMessage());
             System.exit(1);
-            return; // Per il compilatore
+            return;
         }
 
         // Parsing dei parametri di configurazione
@@ -71,7 +71,7 @@ public class ClientMain {
         } catch (IllegalArgumentException e) {
             System.err.println("[Client] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
-            return; // Per il compilatore
+            return;
         }
 
         try {
@@ -113,7 +113,7 @@ public class ClientMain {
             System.out.println("[Client] Configurazione caricata da: " + configFile.getPath());
         } catch (IOException e) {
             System.err.println("[Client] Errore caricamento configurazione: " + e.getMessage());
-            throw e; // Rilancia l'eccezione - il client deve terminare
+            throw e;
         }
 
         return prop;
@@ -215,7 +215,7 @@ public class ClientMain {
                         break;
 
                     default:
-                        System.out.println("[Client] Comando non riconosciuto. Digitare 'help' per aiuto.");
+                        System.out.println("[Client] Comando non riconosciuto. Digitare 'help' per la lista dei comandi.");
                         break;
                 }
 
@@ -230,12 +230,12 @@ public class ClientMain {
      */
     private static void printHelp() {
         System.out.println("\n=== COMANDI DISPONIBILI ===");
-        System.out.println("help                            - Mostra questo messaggio");
-        System.out.println("register <username> <password>  - Registra nuovo utente via RMI");
-        System.out.println("login <username> <password>     - Effettua login e connessione al server");
-        System.out.println("logout                          - Disconnette dal server");
-        System.out.println("updateCredentials <username> <old_pwd> <new_pwd> - Aggiorna password");
-        System.out.println("esci                            - Termina il client");
+        System.out.println("help                                              - Mostra questo messaggio");
+        System.out.println("register <username> <password>                    - Registra nuovo utente");
+        System.out.println("login <username> <password>                       - Effettua login");
+        System.out.println("logout                                            - Disconnette dal server");
+        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>  - Aggiorna password");
+        System.out.println("esci                                              - Termina il client");
         System.out.println();
     }
 
@@ -261,13 +261,13 @@ public class ClientMain {
                 return;
             }
 
-            // Connessione RMI per registrazione (vecchio ordinamento)
+            // Connessione RMI per registrazione
             Registry registry = LocateRegistry.getRegistry(serverHost, rmiPort);
             RegistrazioneRMI rmiService = (RegistrazioneRMI) registry.lookup("server-rmi");
 
             int responseCode = rmiService.register(username, password);
 
-            // Gestisce i codici di risposta secondo le specifiche del progetto
+            // Gestisce i codici di risposta
             switch (responseCode) {
                 case 100:
                     System.out.println("[Client] Registrazione completata con successo per: " + username);
@@ -363,7 +363,7 @@ public class ClientMain {
                 try {
                     tcpSocket.close();
                 } catch (IOException ex) {
-                    // Ignora
+
                 }
                 tcpSocket = null;
             }

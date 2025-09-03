@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Gestisce la comunicazione con un singolo client TCP
@@ -30,18 +31,19 @@ public class ClientHandler implements Runnable {
     private PrintWriter out;
     private Gson gson;
 
-    // Username del client loggato (null se non loggato)
-    private String loggedUsername;
+    // Riferimento alla mappa condivisa socket -> username
+    private ConcurrentHashMap<Socket, String> socketUserMap;
 
     /**
      * Costruttore - inizializza handler per un client specifico
      *
      * @param clientSocket socket della connessione client
+     * @param socketUserMap mappa condivisa socket -> username
      */
-    public ClientHandler(Socket clientSocket) {
+    public ClientHandler(Socket clientSocket, ConcurrentHashMap<Socket, String> socketUserMap) {
         this.clientSocket = clientSocket;
         this.gson = new Gson();
-        this.loggedUsername = null;
+        this.socketUserMap = socketUserMap;
     }
 
     /**
@@ -161,18 +163,14 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(101, "Username/password non corrispondenti");
             }
 
-            // Controlla se già loggato
-            if (UserManager.isUserLoggedIn(user)) {
+            // Controlla se già loggato (cercando nella mappa)
+            if (socketUserMap.containsValue(username)) {
                 System.out.println("[ClientHandler] Login fallito: utente già loggato - " + username);
                 return createErrorResponse(102, "Utente già loggato");
             }
 
-            // Effettua login
-            UserManager.updateLoginStatus(user, true);
-            UserManager.saveUsers(users);
-
-            // Imposta utente loggato per questa connessione
-            loggedUsername = username;
+            // Aggiunge l'associazione socket -> username nella mappa
+            socketUserMap.put(clientSocket, username);
 
             System.out.println("[ClientHandler] Login successful per: " + username);
             return createSuccessResponse("Login effettuato con successo");
@@ -188,30 +186,18 @@ public class ClientHandler implements Runnable {
      */
     private JsonObject handleLogout(JsonObject request) {
         try {
-            // Controlla se l'utente è loggato
-            if (loggedUsername == null) {
+            // Controlla se l'utente è loggato per questo socket
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
                 return createErrorResponse(101, "Utente non loggato");
             }
 
-            // Carica utenti e trova l'utente loggato
-            JsonArray users = UserManager.loadUsers();
-            JsonObject user = UserManager.findUser(users, loggedUsername);
+            // Rimuove l'associazione dalla mappa
+            socketUserMap.remove(clientSocket);
 
-            if (user == null) {
-                return createErrorResponse(101, "Utente non trovato");
-            }
+            System.out.println("[ClientHandler] Logout per: " + username);
 
-            // Effettua logout
-            UserManager.updateLoginStatus(user, false);
-            UserManager.saveUsers(users);
-
-            System.out.println("[ClientHandler] Logout per: " + loggedUsername);
-
-            // Reset username loggato
-            String loggedOutUser = loggedUsername;
-            loggedUsername = null;
-
-            return createSuccessResponse("Logout effettuato per utente: " + loggedOutUser);
+            return createSuccessResponse("Logout effettuato per utente: " + username);
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore durante logout: " + e.getMessage());
@@ -225,28 +211,28 @@ public class ClientHandler implements Runnable {
     private JsonObject handleUpdateCredentials(JsonObject request) {
         try {
             if (!request.has("values")) {
-                return createErrorResponse(105, "Messaggio updateCredentials non valido");
+                return createErrorResponse(103, "Messaggio updateCredentials non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             String username = getStringValue(values, "username");
-            String oldPassword = getStringValue(values, "old_password");
+            String oldPassword = getStringValue(values, "current_password");
             String newPassword = getStringValue(values, "new_password");
 
             // Validazione parametri base
-            if (username == null || username.trim().isEmpty() ||
-                    oldPassword == null || newPassword == null) {
-                return createErrorResponse(105, "Parametri non validi");
-            }
-
-            // Controlla che la nuova password non sia vuota
-            if (newPassword.trim().isEmpty()) {
-                return createErrorResponse(101, "Nuova password non valida");
+            if (username == null || oldPassword == null || newPassword == null ||
+                    username.trim().isEmpty() || oldPassword.isEmpty() || newPassword.trim().isEmpty()) {
+                return createErrorResponse(103, "Parametri non validi");
             }
 
             // Controlla che le password siano diverse
             if (oldPassword.equals(newPassword)) {
                 return createErrorResponse(103, "La nuova password deve essere diversa dalla precedente");
+            }
+
+            // Controlla se l'utente è attualmente loggato
+            if (socketUserMap.containsValue(username)) {
+                return createErrorResponse(104, "Impossibile cambiare password: utente attualmente loggato");
             }
 
             // Carica utenti e cerca l'utente
@@ -258,19 +244,13 @@ public class ClientHandler implements Runnable {
             }
 
             // Controlla password attuale
-            String currentPassword = user.get("password").getAsString();
-            if (!currentPassword.equals(oldPassword)) {
+            String storedPassword = user.get("password").getAsString();
+            if (!storedPassword.equals(oldPassword)) {
                 return createErrorResponse(102, "Password attuale non corretta");
-            }
-
-            // Controlla se l'utente è attualmente loggato
-            if (UserManager.isUserLoggedIn(user)) {
-                return createErrorResponse(104, "Impossibile cambiare password: utente attualmente loggato");
             }
 
             // Aggiorna la password
             user.addProperty("password", newPassword);
-            user.addProperty("lastPasswordUpdate", System.currentTimeMillis());
 
             // Salva utenti aggiornati
             UserManager.saveUsers(users);
@@ -283,8 +263,6 @@ public class ClientHandler implements Runnable {
             return createErrorResponse(105, "Errore interno durante aggiornamento");
         }
     }
-
-
 
     /**
      * Invia una risposta JSON al client
@@ -336,14 +314,22 @@ public class ClientHandler implements Runnable {
      * Ottiene informazioni sul client per logging
      */
     private String getClientInfo() {
-        return loggedUsername != null ? loggedUsername : "anonimo";
+        String username = socketUserMap.get(clientSocket);
+        return username != null ? username : "anonimo";
     }
 
     /**
      * Verifica se il client è autenticato
      */
     private boolean isAuthenticated() {
-        return loggedUsername != null;
+        return socketUserMap.containsKey(clientSocket);
+    }
+
+    /**
+     * Ottiene l'username dell'utente loggato per questo socket
+     */
+    private String getLoggedUsername() {
+        return socketUserMap.get(clientSocket);
     }
 
     /**
@@ -351,20 +337,10 @@ public class ClientHandler implements Runnable {
      */
     private void cleanup() {
         try {
-            // Se l'utente era loggato, effettua logout automatico
-            if (loggedUsername != null) {
-                try {
-                    JsonArray users = UserManager.loadUsers();
-                    JsonObject user = UserManager.findUser(users, loggedUsername);
-                    if (user != null) {
-                        UserManager.updateLoginStatus(user, false);
-                        UserManager.saveUsers(users);
-                        System.out.println("[ClientHandler] Logout automatico per disconnessione: " + loggedUsername);
-                    }
-                } catch (Exception e) {
-                    System.err.println("[ClientHandler] Errore logout automatico: " + e.getMessage());
-                }
-                loggedUsername = null;
+            // Se l'utente era loggato, rimuovilo dalla mappa
+            String username = socketUserMap.remove(clientSocket);
+            if (username != null) {
+                System.out.println("[ClientHandler] Logout automatico per disconnessione: " + username);
             }
 
             System.out.println("[ClientHandler] Disconnessione client: " +

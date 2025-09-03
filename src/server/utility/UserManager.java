@@ -1,10 +1,10 @@
 package server.utility;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.google.gson.GsonBuilder;
 
 import java.io.File;
 import java.io.FileReader;
@@ -27,7 +27,7 @@ public class UserManager {
     // Lock per sincronizzazione accesso concorrente al file utenti
     private static final ReentrantReadWriteLock usersLock = new ReentrantReadWriteLock();
 
-    // Gson per parsing e generazione JSON (singleton)
+    // Gson per parsing e generazione JSON
     private static final Gson gson = new GsonBuilder()
             .setPrettyPrinting()
             .create();
@@ -68,13 +68,27 @@ public class UserManager {
         try {
             File usersFile = new File(USERS_FILE);
 
-            if (!usersFile.exists()) {
-                return new JsonArray(); // File non esiste, lista vuota
+            if (!usersFile.exists() || usersFile.length() == 0) {
+                return new JsonArray(); // File non esiste o è vuoto, lista vuota
             }
 
             try (FileReader reader = new FileReader(usersFile)) {
                 JsonObject rootObject = JsonParser.parseReader(reader).getAsJsonObject();
-                return rootObject.getAsJsonArray("users");
+
+                // Controlla se il file contiene la struttura corretta
+                if (rootObject != null && rootObject.has("users")) {
+                    return rootObject.getAsJsonArray("users");
+                } else {
+                    // File corrotto o struttura non valida, reinizializza
+                    System.out.println("[UserManager] File users.json corrotto, reinizializzazione...");
+                    initializeUsersFile();
+                    return new JsonArray();
+                }
+            } catch (Exception e) {
+                // Se c'è un errore nel parsing, reinizializza il file
+                System.err.println("[UserManager] Errore lettura file utenti, reinizializzazione: " + e.getMessage());
+                initializeUsersFile();
+                return new JsonArray();
             }
         } finally {
             usersLock.readLock().unlock();
@@ -93,7 +107,6 @@ public class UserManager {
         try {
             JsonObject rootObject = new JsonObject();
             rootObject.add("users", users);
-            rootObject.addProperty("lastUpdated", System.currentTimeMillis());
 
             try (FileWriter writer = new FileWriter(USERS_FILE)) {
                 gson.toJson(rootObject, writer);
@@ -146,9 +159,7 @@ public class UserManager {
     public static JsonObject createUser(String username, String password) {
         JsonObject newUser = new JsonObject();
         newUser.addProperty("username", username.trim());
-        newUser.addProperty("password", password); // In produzione andrebbe hashata
-        newUser.addProperty("isLoggedIn", false);
-        newUser.addProperty("registrationTimestamp", System.currentTimeMillis());
+        newUser.addProperty("password", password);
         return newUser;
     }
 
@@ -187,31 +198,6 @@ public class UserManager {
     }
 
     /**
-     * Aggiorna lo stato di login di un utente
-     *
-     * @param user oggetto utente da aggiornare
-     * @param isLoggedIn nuovo stato di login
-     */
-    public static void updateLoginStatus(JsonObject user, boolean isLoggedIn) {
-        user.addProperty("isLoggedIn", isLoggedIn);
-        if (isLoggedIn) {
-            user.addProperty("lastLogin", System.currentTimeMillis());
-        } else {
-            user.addProperty("lastLogout", System.currentTimeMillis());
-        }
-    }
-
-    /**
-     * Controlla se un utente è attualmente loggato
-     *
-     * @param user oggetto utente da controllare
-     * @return true se l'utente è loggato, false altrimenti
-     */
-    public static boolean isUserLoggedIn(JsonObject user) {
-        return user.has("isLoggedIn") && user.get("isLoggedIn").getAsBoolean();
-    }
-
-    /**
      * Getter per il lock degli utenti
      * Permette sincronizzazione avanzata se necessaria
      *
@@ -238,8 +224,6 @@ public class UserManager {
     private static void initializeUsersFile() throws IOException {
         JsonObject rootObject = new JsonObject();
         rootObject.add("users", new JsonArray());
-        rootObject.addProperty("created", System.currentTimeMillis());
-        rootObject.addProperty("version", "1.0");
 
         try (FileWriter writer = new FileWriter(USERS_FILE)) {
             gson.toJson(rootObject, writer);

@@ -9,13 +9,13 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.Properties;
 import java.util.Scanner;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
  * Classe Main del server CROSS
- *
  * Implementa un server multithreaded che gestisce:
  * - Registrazioni via RMI
  * - Login e operazioni via TCP
@@ -33,10 +33,13 @@ public class ServerMain {
     // Thread pool per gestire client multipli
     private static ExecutorService pool;
 
+    // Mappa thread-safe che associa socket dell'utente al suo username
+    private static final ConcurrentHashMap<Socket, String> socketUserMap = new ConcurrentHashMap<>();
+
 
     public static void main(String[] args) {
 
-        System.out.println("[Server] === Avvio Server CROSS ===");
+        System.out.println("[Server] ==== Avvio Server CROSS ====");
 
         // Caricamento delle configurazioni da file properties
         Properties config;
@@ -45,7 +48,7 @@ public class ServerMain {
         } catch (IOException e) {
             System.err.println("[Server] Impossibile caricare configurazione: " + e.getMessage());
             System.exit(1);
-            return; // Per il compilatore
+            return;
         }
 
         // Parsing dei parametri di configurazione
@@ -60,7 +63,7 @@ public class ServerMain {
         } catch (IllegalArgumentException e) {
             System.err.println("[Server] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
-            return; // Per il compilatore
+            return;
         }
 
         // Stampa configurazione caricata con successo
@@ -73,7 +76,7 @@ public class ServerMain {
         try {
             startRMIServer(rmiPort);
         } catch (Exception e) {
-            System.err.println("[Server] Errore avvio RMI: " + e.getMessage());
+            System.err.println("[Server] Errore avvio connessione RMI: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         }
@@ -82,10 +85,10 @@ public class ServerMain {
         try {
             startTCPServer(tcpPort, socketTimeout);
         } catch (IOException e) {
-            System.err.println("[Server] Errore avvio TCP: " + e.getMessage());
+            System.err.println("[Server] Errore avvio connessione TCP: " + e.getMessage());
             System.exit(1);
         } catch (Exception e) {
-            System.err.println("[Server] ERRORE IMPREVISTO durante avvio TCP: " + e.getMessage());
+            System.err.println("[Server] ERRORE IMPREVISTO durante avvio connessione TCP: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         } finally {
@@ -115,7 +118,7 @@ public class ServerMain {
             System.out.println("[Server] Configurazione caricata da: " + configFile.getPath());
         } catch (IOException e) {
             System.err.println("[Server] Errore caricamento configurazione: " + e.getMessage());
-            throw e; // Rilancia l'eccezione - il server deve terminare
+            throw e;
         }
 
         return prop;
@@ -153,13 +156,8 @@ public class ServerMain {
      */
     private static void startRMIServer(int rmiPort) throws Exception {
 
-        // Crea l'implementazione RMI
         RegistrazioneRMIImpl rmiImpl = new RegistrazioneRMIImpl();
-
-        // Esporta l'oggetto e ottieni lo stub (pattern slide 26)
         RegistrazioneRMI stub = (RegistrazioneRMI) java.rmi.server.UnicastRemoteObject.exportObject(rmiImpl, 0);
-
-        // Crea registry e registra lo stub
         LocateRegistry.createRegistry(rmiPort);
         Registry registry = LocateRegistry.getRegistry(rmiPort);
         registry.rebind("server-rmi", stub);
@@ -179,7 +177,6 @@ public class ServerMain {
         pool = Executors.newCachedThreadPool();
         System.out.println("[Server] Thread pool inizializzato (CachedThreadPool)");
 
-        // Crea server socket per connessioni TCP
         serverSocket = new ServerSocket(tcpPort);
         System.out.println("[Server] Server TCP in ascolto sulla porta " + tcpPort);
 
@@ -200,7 +197,7 @@ public class ServerMain {
 
                 // Crea handler per questo client e lo sottomette al thread pool
                 // Ogni client viene gestito in un thread separato
-                ClientHandler clientHandler = new ClientHandler(clientSocket);
+                ClientHandler clientHandler = new ClientHandler(clientSocket, socketUserMap);
                 pool.submit(clientHandler);
 
             } catch (IOException e) {
@@ -218,8 +215,11 @@ public class ServerMain {
     private static void listenForTerminalCommands() {
         Scanner scanner = new Scanner(System.in);
 
+        System.out.println("[Server] Digita 'esci' per terminare il server");
+
         while (running) {
-            System.out.print("[Server] Digita 'esci' per terminare il server: ");
+            System.out.print(">> ");
+            System.out.flush(); // Forza la stampa del prompt
 
             try {
                 String command = scanner.nextLine().trim().toLowerCase();
@@ -236,9 +236,14 @@ public class ServerMain {
                     }
 
                     break;
+                } else if (!command.isEmpty()) {
+                    System.out.println("[Server] Comando non riconosciuto: " + command);
+                    System.out.println("[Server] Digita 'esci' per terminare il server");
                 }
             } catch (Exception e) {
-                System.err.println("[Server] Errore lettura comando: " + e.getMessage());
+                if (running) {
+                    System.err.println("[Server] Errore lettura comando: " + e.getMessage());
+                }
             }
         }
 
