@@ -267,8 +267,8 @@ public class ClientMain {
             String password = parts[2];
 
             // Validazione contenuto parametri
-            if (username.isEmpty() || password.isEmpty()) {
-                System.out.println("[Client] Username e password non possono essere vuoti");
+            if (username.trim().isEmpty() || password.trim().isEmpty()) {
+                System.out.println("[Client] Username e password non possono essere vuoti o contenere solo spazi");
                 return;
             }
 
@@ -305,7 +305,7 @@ public class ClientMain {
 
     /**
      * Gestisce il login utente con connessione TCP persistente
-     * La connessione TCP rimane aperta per tutta la sessione utente
+     * Implementa autenticazione e mantenimento sessione secondo ALLEGATO 1
      *
      * @param parts comando parsato dall'input utente
      * @param serverHost indirizzo del server per connessione TCP
@@ -330,8 +330,8 @@ public class ClientMain {
             String password = parts[2];
 
             // Validazione contenuto parametri
-            if (username.isEmpty() || password.isEmpty()) {
-                System.out.println("[Client] Username e password non possono essere vuoti");
+            if (username.trim().isEmpty() || password.trim().isEmpty()) {
+                System.out.println("[Client] Username e password non possono essere vuoti o contenere solo spazi");
                 return;
             }
 
@@ -435,8 +435,7 @@ public class ClientMain {
 
     /**
      * Gestisce l'aggiornamento delle credenziali utente con connessione temporanea
-     * Crea una connessione TCP dedicata solo per questa operazione,
-     * la chiude automaticamente al termine indipendentemente dal risultato
+     * Crea una connessione TCP dedicata solo per questa operazione
      *
      * @param parts comando parsato dall'input utente con parametri
      * @param serverHost indirizzo del server per connessione TCP
@@ -455,8 +454,8 @@ public class ClientMain {
         String newPassword = parts[3];
 
         // Validazione contenuto parametri
-        if (username.isEmpty() || oldPassword.isEmpty() || newPassword.isEmpty()) {
-            System.out.println("[Client] Tutti i parametri sono obbligatori");
+        if (username.trim().isEmpty() || oldPassword.trim().isEmpty() || newPassword.trim().isEmpty()) {
+            System.out.println("[Client] Tutti i parametri sono obbligatori e non possono contenere solo spazi");
             return;
         }
 
@@ -476,9 +475,10 @@ public class ClientMain {
             tempIn = new BufferedReader(new InputStreamReader(tempSocket.getInputStream()));
             tempOut = new PrintWriter(tempSocket.getOutputStream(), true);
 
-            System.out.println("[Client] Connessione temporanea stabilita con " + tempSocket.getRemoteSocketAddress());
+            System.out.println("[Client] Connessione temporanea stabilita con " +
+                    tempSocket.getRemoteSocketAddress());
 
-            // Costruzione richiesta JSON conforme ALLEGATO 1
+            // Costruzione richiesta JSON
             JsonObject request = new JsonObject();
             request.addProperty("operation", "updateCredentials");
 

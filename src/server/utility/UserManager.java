@@ -202,7 +202,7 @@ public class UserManager {
      */
     public static boolean validateLoginParams(String username, String password) {
         return username != null && !username.trim().isEmpty() &&
-                password != null && !password.isEmpty();
+                password != null && !password.trim().isEmpty();
     }
 
     /**

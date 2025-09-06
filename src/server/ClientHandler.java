@@ -266,7 +266,7 @@ public class ClientHandler implements Runnable {
 
             // Validazione parametri base
             if (username == null || oldPassword == null || newPassword == null ||
-                    username.trim().isEmpty() || oldPassword.isEmpty() || newPassword.trim().isEmpty()) {
+                    username.trim().isEmpty() || oldPassword.trim().isEmpty() || newPassword.trim().isEmpty()) {
                 return createErrorResponse(103, "Parametri non validi");
             }
 
