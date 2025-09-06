@@ -14,7 +14,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Classe di utilità per la gestione degli utenti del sistema CROSS
- * Fornisce metodi centralizzati e thread-safe per tutte le operazioni sugli utenti:
  * - Caricamento e salvataggio utenti da/in file JSON con formattazione
  * - Ricerca e validazione utenti
  * - Creazione nuovi utenti
@@ -27,15 +26,13 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 public class UserManager {
 
     // File per memorizzare gli utenti registrati in formato JSON
-    // Path relativo alla directory di esecuzione del server
     private static final String USERS_FILE = "data/users.json";
 
     // Lock per sincronizzazione accesso concorrente al file utenti
     // ReadWrite lock permette letture multiple simultanee ma scritture esclusive
     private static final ReentrantReadWriteLock usersLock = new ReentrantReadWriteLock();
 
-    // Gson configurato
-    // Utilizza GsonBuilder per abilitare la formattazione con indentazione
+    // Configurazione Gson
     private static final Gson gson = new GsonBuilder()
             .setPrettyPrinting()
             .create();
@@ -44,14 +41,6 @@ public class UserManager {
      * Inizializza il sistema di gestione utenti
      * Configura il filesystem e prepara le strutture dati necessarie per il funzionamento
      * Crea la directory data e il file utenti se non esistono
-     *
-     * Questo metodo deve essere chiamato all'avvio del server per garantire
-     * che tutte le risorse necessarie siano disponibili prima di accettare richieste
-     *
-     * Operazioni eseguite:
-     * 1. Creazione directory "data/" se non esiste
-     * 2. Inizializzazione file users.json con struttura vuota se non esiste
-     * 3. Logging delle operazioni per debugging
      *
      * @throws IOException se errori nell'inizializzazione del filesystem o creazione file
      */
@@ -76,13 +65,6 @@ public class UserManager {
     /**
      * Carica la lista degli utenti dal file JSON
      * Implementa lettura thread-safe con lock in lettura per permettere accessi concorrenti
-     * Gestisce in modo robusto file corrotti, vuoti o con struttura non valida
-     *
-     * Strategia di recupero dagli errori:
-     * - File inesistente o vuoto: restituisce array vuoto
-     * - File corrotto: reinizializza automaticamente e restituisce array vuoto
-     * - Struttura JSON non valida: reinizializza e restituisce array vuoto
-     *
      * Il lock in lettura permette a più thread di leggere contemporaneamente
      * ma blocca durante le operazioni di scrittura
      *
@@ -123,20 +105,8 @@ public class UserManager {
     }
 
     /**
-     * Salva la lista degli utenti nel file JSON con formattazione
+     * Salva la lista degli utenti nel file JSON
      * Implementa scrittura thread-safe con lock esclusivo per evitare corruzioni
-     * Utilizza pretty printing per generare JSON leggibile e ben formattato
-     *
-     * Il lock in scrittura è esclusivo: blocca tutte le altre operazioni
-     * (sia lettura che scrittura) per garantire consistenza dei dati
-     *
-     * Struttura JSON generata:
-     * {
-     *   "users": [
-     *     { "username": "...", "password": "..." },
-     *     ...
-     *   ]
-     * }
      *
      * @param users JsonArray contenente tutti gli utenti da salvare su file
      * @throws IOException se errori nella scrittura del file o problemi di I/O
@@ -157,11 +127,6 @@ public class UserManager {
 
     /**
      * Cerca un utente per username nella lista
-     * Implementa ricerca lineare case-sensitive nella lista degli utenti
-     * Gestisce in modo sicuro valori null e applica trim all'username
-     *
-     * La ricerca è case-sensitive e utilizza equals() per confronto esatto.
-     * Applica automaticamente trim() all'username di ricerca per robustezza
      *
      * @param users lista degli utenti in cui effettuare la ricerca
      * @param username username da cercare (viene applicato trim automaticamente)
@@ -183,13 +148,6 @@ public class UserManager {
 
     /**
      * Controlla se un username esiste già nel sistema
-     * Metodo di utilità che combina loadUsers() e findUser() per controllo esistenza
-     * Utilizzato durante la registrazione per enforcare l'unicità degli username
-     *
-     * Esegue le operazioni in sequenza:
-     * 1. Carica la lista completa degli utenti
-     * 2. Cerca l'username nella lista
-     * 3. Restituisce true se trovato, false altrimenti
      *
      * @param username username da verificare nel sistema
      * @return true se l'username esiste già, false altrimenti
@@ -202,17 +160,6 @@ public class UserManager {
 
     /**
      * Crea un nuovo oggetto utente con i parametri specificati
-     * Genera un JsonObject contenente solo i campi richiesti dall'ALLEGATO 1
-     * Applica automaticamente trim all'username per rimuovere spazi accidentali
-     *
-     * Struttura utente creata (conforme alle specifiche):
-     * {
-     *   "username": "username_trimmed",
-     *   "password": "password_as_provided"
-     * }
-     *
-     * Non include campi aggiuntivi come timestamp o stati di login
-     * per mantenere la struttura minimal richiesta dalle specifiche
      *
      * @param username nome utente scelto (viene applicato trim automaticamente)
      * @param password password scelta dall'utente (mantenuta come fornita)
@@ -226,18 +173,7 @@ public class UserManager {
     }
 
     /**
-     * Valida i parametri di registrazione secondo le specifiche dell'ALLEGATO 1
-     * Implementa tutti i controlli richiesti per la registrazione di nuovi utenti
-     * Restituisce codici di errore numerici conformi alle specifiche del progetto
-     *
-     * Controlli eseguiti:
-     * - Username non null e non vuoto (dopo trim)
-     * - Password non null e non vuota (dopo trim)
-     *
-     * Codici di errore conformi all'ALLEGATO 1:
-     * - 0: parametri validi, registrazione può procedere
-     * - 101: password non valida (vuota o null)
-     * - 103: username non valido (vuoto o null)
+     * Valida i parametri di registrazione
      *
      * @param username nome utente da validare
      * @param password password da validare
@@ -257,14 +193,7 @@ public class UserManager {
 
     /**
      * Valida i parametri di login con controlli più permissivi rispetto alla registrazione
-     * I controlli di login sono meno stringenti per permettere password con spazi
-     * Utilizzato dal ClientHandler per validazione rapida prima dell'autenticazione
-     *
-     * Differenze rispetto alla validazione registrazione:
-     * - Password: controlla solo isEmpty() (non trim().isEmpty())
-     * - Username: applica trim() come per registrazione
-     *
-     * Questo permette password che contengono solo spazi (tecnicamente valide per login)
+     * permette password che contengono solo spazi (tecnicamente valide per login)
      * ma impedisce password completamente vuote
      *
      * @param username nome utente da validare per login
@@ -278,12 +207,6 @@ public class UserManager {
 
     /**
      * Getter per il lock degli utenti
-     * Espone il ReentrantReadWriteLock per sincronizzazione avanzata se necessaria
-     * Permette ad altre classi di implementare operazioni atomiche complesse
-     * che richiedono controllo granulare del locking
-     *
-     * Uso tipico: operazioni che richiedono lettura + scrittura atomica
-     * o sincronizzazione con altre risorse del sistema
      *
      * @return ReentrantReadWriteLock per sincronizzazione esterna
      */
@@ -293,8 +216,6 @@ public class UserManager {
 
     /**
      * Getter per il path del file utenti
-     * Espone il percorso del file per debugging, configurazioni avanzate
-     * o operazioni di manutenzione del sistema
      *
      * @return String contenente il percorso completo del file utenti
      */
@@ -305,10 +226,6 @@ public class UserManager {
     /**
      * Inizializza il file degli utenti con una struttura JSON vuota
      * Crea la struttura base del file
-     *
-     * Metodo privato chiamato automaticamente quando necessario da:
-     * - initialize() se il file non esiste
-     * - loadUsers() se il file è corrotto
      *
      * @throws IOException se errori nella creazione o scrittura del file
      */

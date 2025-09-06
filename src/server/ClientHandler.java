@@ -18,18 +18,10 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Gestisce la comunicazione con un singolo client TCP del sistema CROSS
  * Ogni istanza viene eseguita da un thread diverso preso dal pool del server
- * per garantire la gestione concorrente di più client simultaneamente.
- *
- * Responsabilità principali:
  * - Gestione del protocollo di comunicazione JSON con il client
  * - Implementazione delle operazioni di autenticazione e gestione account
  * - Sincronizzazione con la mappa globale socket-utente per stato login
  * - Gestione robusta degli errori e cleanup delle risorse
- *
- * Operazioni supportate (conformi all'ALLEGATO 1):
- * - login: autenticazione utente con credenziali
- * - logout: disconnessione utente dal sistema
- * - updateCredentials: aggiornamento password utente
  *
  * Utilizza UserManager per tutte le operazioni sui dati utenti,
  * garantendo centralizzazione e consistenza della logica di persistenza.
@@ -50,16 +42,12 @@ public class ClientHandler implements Runnable {
 
     // Riferimento alla mappa condivisa socket -> username
     // Utilizzata per tracciare quali utenti sono attualmente loggati
-    // e su quale socket, permettendo logout efficiente senza I/O su file
     private ConcurrentHashMap<Socket, String> socketUserMap;
 
     /**
      * Costruttore - inizializza handler per un client specifico
      * Configura tutte le risorse necessarie per la gestione del client
-     *
-     * Il socket viene passato dal server principale dopo accept()
      * La mappa degli utenti loggati è condivisa tra tutti i ClientHandler
-     * per permettere controlli di stato globali
      *
      * @param clientSocket socket della connessione TCP stabilita con il client
      * @param socketUserMap mappa condivisa thread-safe socket -> username per tracking login
@@ -72,14 +60,12 @@ public class ClientHandler implements Runnable {
 
     /**
      * Main del thread - gestisce le comunicazioni con il client
-     * Implementa il ciclo di vita completo della connessione client:
      * 1. Setup degli stream di comunicazione
      * 2. Loop di gestione messaggi JSON
      * 3. Gestione timeout e disconnessioni
      * 4. Cleanup garantito delle risorse
      *
-     * Questo metodo viene eseguito dal thread pool del server,
-     * permettendo gestione concorrente di più client
+     * Questo metodo viene eseguito dal thread pool del server
      */
     @Override
     public void run() {
@@ -110,9 +96,6 @@ public class ClientHandler implements Runnable {
      * Configura BufferedReader per lettura efficiente delle righe JSON
      * e PrintWriter con autoflush per invio immediato delle risposte
      *
-     * Gli stream sono wrappati attorno ai socket streams per
-     * gestione ottimizzata di messaggi testuali JSON
-     *
      * @throws IOException se errori nella creazione degli stream dal socket
      */
     private void setupStreams() throws IOException {
@@ -122,16 +105,6 @@ public class ClientHandler implements Runnable {
 
     /**
      * Loop principale che gestisce i messaggi JSON dal client
-     * Implementa il protocollo request-response del sistema CROSS
-     *
-     * Flusso di elaborazione per ogni messaggio:
-     * 1. Lettura riga JSON dal client
-     * 2. Parsing e validazione struttura JSON
-     * 3. Estrazione campo "operation" obbligatorio
-     * 4. Dispatch all'handler appropriato
-     * 5. Invio risposta JSON formattata
-     *
-     * Gestione errori robusta per JSON malformato e operazioni non valide
      *
      * @throws IOException se errori nella comunicazione con il client
      */
@@ -152,7 +125,7 @@ public class ClientHandler implements Runnable {
                 System.out.println("[ClientHandler] Operazione ricevuta: " + operation +
                         " da " + getClientInfo());
 
-                // Dispatch dell'operazione all'handler specifico
+                // Dispatch dell'operazione handler specifico
                 JsonObject response = processOperation(operation, request);
 
                 // Invio della risposta JSON al client
@@ -171,46 +144,27 @@ public class ClientHandler implements Runnable {
 
     /**
      * Processa le operazioni ricevute dal client
-     * Dispatcher centrale che instrada le richieste agli handler specifici
-     * basandosi sul campo "operation" del messaggio JSON
-     *
-     * Utilizza switch expression (Java 14+) per routing efficiente
-     * Operazioni supportate conformi all'ALLEGATO 1:
-     * - "login": autenticazione utente
-     * - "logout": disconnessione utente
-     * - "updateCredentials": cambio password
-     *
-     * Operazioni non riconosciute generano errore codice 103
      *
      * @param operation tipo di operazione richiesta dal client
      * @param request oggetto JSON completo della richiesta con parametri
      * @return JsonObject contenente la risposta da inviare al client
      */
     private JsonObject processOperation(String operation, JsonObject request) {
-        return switch (operation) {
-            case "login" -> handleLogin(request);
-            case "logout" -> handleLogout(request);
-            case "updateCredentials" -> handleUpdateCredentials(request);
-            default -> createErrorResponse(103, "Operazione non supportata: " + operation);
-        };
+        // Switch compatibile Java 8
+        switch (operation) {
+            case "login":
+                return handleLogin(request);
+            case "logout":
+                return handleLogout(request);
+            case "updateCredentials":
+                return handleUpdateCredentials(request);
+            default:
+                return createErrorResponse(103, "Operazione non supportata: " + operation);
+        }
     }
 
     /**
      * Gestisce il login del client
-     * Implementa il processo completo di autenticazione secondo l'ALLEGATO 1
-     *
-     * Flusso di autenticazione:
-     * 1. Validazione struttura JSON (campo "values")
-     * 2. Estrazione e validazione parametri username/password
-     * 3. Ricerca utente nel sistema tramite UserManager
-     * 4. Verifica password (confronto diretto)
-     * 5. Controllo stato login (tramite mappa socket-utente)
-     * 6. Registrazione login nella mappa se successo
-     *
-     * Codici di errore conformi alle specifiche:
-     * - 101: username/password non corrispondenti o utente inesistente
-     * - 102: utente già loggato su altra connessione
-     * - 103: errori di validazione parametri o interni
      *
      * @param request oggetto JSON contenente username e password nel campo "values"
      * @return JsonObject con codice risposta e messaggio secondo ALLEGATO 1
@@ -239,7 +193,7 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(101, "Username/password non corrispondenti");
             }
 
-            // Verifica password (confronto diretto - password in chiaro)
+            // Verifica password
             String storedPassword = user.get("password").getAsString();
             if (!storedPassword.equals(password)) {
                 System.out.println("[ClientHandler] Login fallito: password errata - " + username);
@@ -269,18 +223,6 @@ public class ClientHandler implements Runnable {
      * Implementa disconnessione utente dal sistema rimuovendo
      * l'associazione dalla mappa socket-utente
      *
-     * Il logout non richiede parametri nel campo "values" -
-     * utilizza il socket corrente per identificare l'utente loggato
-     *
-     * Processo di logout:
-     * 1. Verifica se socket ha utente associato nella mappa
-     * 2. Rimozione associazione socket-utente
-     * 3. Logging dell'operazione
-     *
-     * Codici di errore:
-     * - 101: utente non loggato (socket non nella mappa)
-     * - 101: errori interni durante logout
-     *
      * @param request oggetto JSON della richiesta (values vuoto per logout)
      * @return JsonObject con codice risposta e messaggio
      */
@@ -307,24 +249,6 @@ public class ClientHandler implements Runnable {
 
     /**
      * Gestisce l'aggiornamento delle credenziali utente
-     * Implementa cambio password SENZA richiedere login (conforme ALLEGATO 1)
-     *
-     * Secondo l'ALLEGATO 1: "un utente attualmente loggato non può aggiornare
-     * la propria password", quindi questa operazione deve essere disponibile
-     * per connessioni TCP non autenticate.
-     *
-     * Flusso aggiornamento credenziali:
-     * 1. Validazione parametri (username, old_password, new_password)
-     * 2. Controllo che password siano diverse (requisito ALLEGATO 1)
-     * 3. Verifica che utente NON sia attualmente loggato (vincolo ALLEGATO 1)
-     * 4. Ricerca utente e verifica password attuale
-     * 5. Aggiornamento password e salvataggio
-     *
-     * Codici di errore conformi all'ALLEGATO 1:
-     * - 102: username inesistente o password attuale errata
-     * - 103: parametri non validi o password uguali
-     * - 104: utente attualmente loggato (operazione non permessa)
-     * - 105: errori interni durante aggiornamento
      *
      * @param request oggetto JSON con username, old_password, new_password
      * @return JsonObject con codice risposta secondo specifiche ALLEGATO 1
@@ -346,12 +270,12 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(103, "Parametri non validi");
             }
 
-            // Controlla che le password siano diverse (requisito ALLEGATO 1)
+            // Controlla che le password siano diverse
             if (oldPassword.equals(newPassword)) {
                 return createErrorResponse(103, "La nuova password deve essere diversa dalla precedente");
             }
 
-            // VINCOLO ALLEGATO 1: Verifica che utente NON sia attualmente loggato
+            // Verifica che utente NON sia attualmente loggato
             if (socketUserMap.containsValue(username)) {
                 return createErrorResponse(104, "Impossibile cambiare password: utente attualmente loggato");
             }
@@ -376,7 +300,8 @@ public class ClientHandler implements Runnable {
             // Salva utenti aggiornati tramite UserManager
             UserManager.saveUsers(users);
 
-            System.out.println("[ClientHandler] Password aggiornata per utente: " + username + " (richiesta da connessione non autenticata)");
+            System.out.println("[ClientHandler] Password aggiornata per utente: " + username +
+                    " (richiesta da connessione non autenticata)");
             return createSuccessResponse("Password aggiornata con successo");
 
         } catch (Exception e) {
@@ -390,8 +315,6 @@ public class ClientHandler implements Runnable {
      * Serializza l'oggetto JsonObject in stringa JSON e lo invia
      * tramite il PrintWriter con autoflush abilitato
      *
-     * Metodo centrale per tutte le comunicazioni verso il client
-     *
      * @param response oggetto JsonObject contenente la risposta da serializzare e inviare
      */
     private void sendResponse(JsonObject response) {
@@ -404,7 +327,7 @@ public class ClientHandler implements Runnable {
      * Metodo di utilità per creare e inviare rapidamente risposte di errore
      * Combina creazione dell'oggetto errore e invio in una singola chiamata
      *
-     * @param errorCode codice numerico dell'errore (secondo ALLEGATO 1)
+     * @param errorCode codice numerico dell'errore
      * @param errorMessage messaggio descrittivo dell'errore per debugging
      */
     private void sendErrorResponse(int errorCode, String errorMessage) {
@@ -414,16 +337,10 @@ public class ClientHandler implements Runnable {
 
     /**
      * Crea una risposta di successo standard
-     * Genera oggetto JSON conforme all'ALLEGATO 1 per operazioni completate con successo
-     *
-     * Struttura risposta successo:
-     * {
-     *   "response": 100,
-     *   "errorMessage": "messaggio_di_successo"
-     * }
+     * Genera oggetto JSON
      *
      * @param message messaggio descrittivo del successo dell'operazione
-     * @return JsonObject formattato secondo specifiche ALLEGATO 1
+     * @return JsonObject formattato
      */
     private JsonObject createSuccessResponse(String message) {
         JsonObject response = new JsonObject();
@@ -434,17 +351,11 @@ public class ClientHandler implements Runnable {
 
     /**
      * Crea una risposta di errore standard
-     * Genera oggetto JSON conforme all'ALLEGATO 1 per errori
-     *
-     * Struttura risposta errore:
-     * {
-     *   "response": codice_errore,
-     *   "errorMessage": "descrizione_errore"
-     * }
+     * Genera oggetto JSON conforme
      *
      * @param errorCode codice numerico dell'errore (101, 102, 103, etc.)
      * @param errorMessage messaggio descrittivo dell'errore
-     * @return JsonObject formattato secondo specifiche ALLEGATO 1
+     * @return JsonObject formattato
      */
     private JsonObject createErrorResponse(int errorCode, String errorMessage) {
         JsonObject response = new JsonObject();
@@ -455,8 +366,6 @@ public class ClientHandler implements Runnable {
 
     /**
      * Estrae un valore stringa da un JsonObject in modo sicuro
-     * Gestisce casi di chiavi mancanti o valori null senza generare eccezioni
-     * Metodo di utilità per parsing robusto dei parametri JSON
      *
      * @param obj oggetto JsonObject da cui estrarre il valore
      * @param key chiave da cercare nell'oggetto JSON
@@ -484,7 +393,6 @@ public class ClientHandler implements Runnable {
     /**
      * Verifica se il client è autenticato
      * Controlla presenza del socket nella mappa degli utenti loggati
-     * Metodo di utilità per controlli di autorizzazione (attualmente non utilizzato)
      *
      * @return true se il client è loggato (socket nella mappa), false altrimenti
      */
@@ -505,37 +413,37 @@ public class ClientHandler implements Runnable {
 
     /**
      * Cleanup delle risorse quando il client si disconnette
-     * Garantisce rilascio ordinato di tutte le risorse associate al client:
-     * - Rimozione automatica dalla mappa degli utenti loggati
-     * - Chiusura stream di comunicazione
-     * - Chiusura socket TCP
-     *
-     * Questo metodo viene sempre chiamato nel blocco finally del thread,
-     * garantendo cleanup anche in caso di eccezioni impreviste.
-     *
-     * Il logout automatico previene "utenti fantasma" che rimangono
-     * loggati dopo disconnessioni improvvise.
+     * Garantisce rilascio ordinato di tutte le risorse associate al client
      */
     private void cleanup() {
+        // Logout automatico se client era loggato
+        String username = socketUserMap.remove(clientSocket);
+        if (username != null) {
+            System.out.println("[ClientHandler] Logout automatico per: " + username +
+                    " (disconnessione client)");
+        }
+
+        // Chiusura stream di comunicazione
         try {
-            // Rimozione automatica dalla mappa se utente era loggato
-            String username = socketUserMap.remove(clientSocket);
-            if (username != null) {
-                System.out.println("[ClientHandler] Logout automatico per disconnessione: " + username);
+            if (in != null) {
+                in.close();
             }
+            if (out != null) {
+                out.close();
+            }
+        } catch (IOException e) {
+            System.err.println("[ClientHandler] Errore chiusura stream: " + e.getMessage());
+        }
 
-            System.out.println("[ClientHandler] Disconnessione client: " +
-                    clientSocket.getRemoteSocketAddress());
-
-            // Chiusura ordinata degli stream
-            if (in != null) in.close();
-            if (out != null) out.close();
+        // Chiusura socket TCP
+        try {
             if (clientSocket != null && !clientSocket.isClosed()) {
                 clientSocket.close();
+                System.out.println("[ClientHandler] Socket client chiuso: " +
+                        clientSocket.getRemoteSocketAddress());
             }
-
         } catch (IOException e) {
-            System.err.println("[ClientHandler] Errore cleanup: " + e.getMessage());
+            System.err.println("[ClientHandler] Errore chiusura socket: " + e.getMessage());
         }
     }
 }

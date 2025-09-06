@@ -20,34 +20,20 @@ import com.google.gson.JsonParser;
 import server.RegistrazioneRMI;
 
 /**
- * Classe Main del client CROSS (Cryptocurrency Online Stock Simulator)
+ * Classe Main del client CROSS
  * Implementa un client completo che gestisce l'interazione utente con il sistema CROSS
- * seguendo le specifiche del progetto che richiedono separazione tra:
- * - Registrazione via RMI (per studenti vecchio ordinamento)
- * - Login e altre operazioni via TCP (connessioni persistenti)
- *
- * Architettura client:
- * - Interfaccia a linea di comando con prompt interattivo
- * - Gestione configurazione centralizzata tramite file properties
- * - Thread pool per operazioni asincrone (attualmente non utilizzato ma preparato)
- * - Gestione robusta degli errori e cleanup delle risorse
- * - Protocollo di comunicazione JSON conforme all'ALLEGATO 1
- *
- * Responsabilità principali:
  * - Interfaccia utente con parsing comandi e validazione input
  * - Gestione connessioni RMI per registrazione nuovi utenti
  * - Gestione connessioni TCP per login e operazioni post-autenticazione
  * - Serializzazione/deserializzazione messaggi JSON
- * - Interpretazione codici di risposta del server secondo ALLEGATO 1
+ * - Interpretazione codici di risposta del server
  */
 public class ClientMain {
 
     // Flag volatile per terminazione thread-safe del client
-    // Volatile garantisce visibilità tra thread per shutdown ordinato
     private static volatile boolean running = true;
 
     // Socket TCP per comunicazione persistente con il server
-    // Null quando non connesso, aperto durante sessione autenticata
     private static Socket tcpSocket;
 
     // Stream per comunicazione JSON bidirezionale con il server
@@ -55,24 +41,20 @@ public class ClientMain {
     private static PrintWriter out;     // Invio richieste JSON al server
 
     // Thread pool per gestire operazioni asincrone future
-    // Attualmente non utilizzato ma preparato per estensioni
     private static ExecutorService pool;
 
     // Scanner per input utente da console con gestione delle righe
     private static Scanner userScanner;
 
     /**
-     * Main del client CROSS - Punto di ingresso dell'applicazione client
-     * Orchestratore principale del ciclo di vita del client:
+     * Main del client CROSS
      * 1. Caricamento configurazione da file properties
      * 2. Parsing e validazione parametri di connessione
      * 3. Inizializzazione risorse (thread pool, scanner input)
      * 4. Avvio interfaccia utente interattiva
      * 5. Shutdown ordinato delle risorse
      *
-     * Gestione errori robusta con terminazione pulita in caso di problemi critici
-     *
-     * @param args argomenti da linea di comando (attualmente non utilizzati)
+     * @param args argomenti da linea di comando
      */
     public static void main(String[] args) {
 
@@ -85,7 +67,7 @@ public class ClientMain {
         } catch (IOException e) {
             System.err.println("[Client] Impossibile caricare configurazione: " + e.getMessage());
             System.exit(1);
-            return; // Per sicurezza del compilatore
+            return;
         }
 
         // Parsing dei parametri di configurazione con gestione errori
@@ -102,11 +84,11 @@ public class ClientMain {
         } catch (IllegalArgumentException e) {
             System.err.println("[Client] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
-            return; // Per sicurezza del compilatore
+            return;
         }
 
         try {
-            // Inizializza thread pool per operazioni asincrone future
+            // Inizializza thread pool per le operazioni
             pool = Executors.newCachedThreadPool();
             System.out.println("[Client] Thread pool inizializzato (CachedThreadPool)");
 
@@ -120,55 +102,39 @@ public class ClientMain {
             System.err.println("[Client] Errore durante esecuzione: " + e.getMessage());
             e.printStackTrace();
         } finally {
-            // Cleanup garantito delle risorse anche in caso di eccezioni
             shutdownClient();
         }
     }
 
     /**
-     * Carica il file di configurazione del client
-     * Legge parametri di connessione dal file client.properties
-     * Il client termina se il file non esiste per evitare configurazioni errate
+     * Carica la configurazione dal file client.properties
      *
-     * Parametri attesi nel file properties:
-     * - server.host: indirizzo IP o hostname del server CROSS
-     * - TCP.port: porta per connessioni client-server
-     * - RMI.port: porta per registry RMI (registrazioni)
-     * - socket.timeout: timeout connessioni TCP in millisecondi
-     *
-     * @return oggetto Properties con le configurazioni caricate e validate
-     * @throws IOException se il file non esiste, non è leggibile o ha errori di formato
+     * @return Properties oggetto con la configurazione caricata e validata
+     * @throws IOException se il file di configurazione non esiste o è illeggibile
      */
     private static Properties loadConfiguration() throws IOException {
+        Properties prop = new Properties();
+
         File configFile = new File("src/client/client.properties");
 
         if (!configFile.exists()) {
             throw new IOException("File di configurazione non trovato: " + configFile.getPath());
         }
 
-        Properties prop = new Properties();
-
         try (FileReader reader = new FileReader(configFile)) {
             prop.load(reader);
             System.out.println("[Client] Configurazione caricata da: " + configFile.getPath());
-        } catch (IOException e) {
-            System.err.println("[Client] Errore caricamento configurazione: " + e.getMessage());
-            throw e; // Rilancia l'eccezione - il client deve terminare
         }
 
         return prop;
     }
 
     /**
-     * Effettua il parsing di un numero intero da Properties
-     * Valida che la property esista e sia un numero intero valido
-     * Se la property manca o non è un numero valido, il client termina
-     *
-     * Garantisce che tutti i parametri numerici siano validi prima dell'avvio
+     * Effettua il parsing di un intero da Properties
      *
      * @param props oggetto Properties contenente la configurazione
-     * @param key chiave da cercare nel file properties
-     * @return valore parsato come intero
+     * @param key chiave della property da leggere
+     * @return valore della property parsato come intero
      * @throws IllegalArgumentException se la property manca o è invalida
      */
     private static int parseRequiredIntProperty(Properties props, String key) {
@@ -187,10 +153,6 @@ public class ClientMain {
 
     /**
      * Effettua il parsing di una stringa da Properties
-     * Valida che la property server.host esista e non sia vuota
-     * Se la property manca, il client termina
-     *
-     * Metodo specializzato per il parsing dell'hostname del server
      *
      * @param props oggetto Properties contenente la configurazione
      * @return valore dell'hostname del server con trim applicato
@@ -209,25 +171,13 @@ public class ClientMain {
     /**
      * Interfaccia utente principale del client
      * Implementa il loop interattivo con prompt per input comandi utente
-     * Gestisce parsing comandi e dispatching alle funzioni appropriate
-     *
-     * Comandi supportati:
-     * - help: mostra lista comandi disponibili
-     * - register: registrazione nuovo utente via RMI
-     * - login: autenticazione e connessione TCP al server
-     * - logout: disconnessione dal server
-     * - updateCredentials: aggiornamento password
-     * - esci: terminazione client
-     *
-     * Utilizza prompt ">>" per coerenza con interfaccia server
      *
      * @param serverHost indirizzo del server CROSS
      * @param tcpPort porta TCP del server per connessioni client
      * @param rmiPort porta RMI del server per registrazioni
      * @param socketTimeout timeout per socket TCP in millisecondi
      */
-    private static void startUserInterface(String serverHost, int tcpPort, int rmiPort,
-                                           int socketTimeout) {
+    private static void startUserInterface(String serverHost, int tcpPort, int rmiPort, int socketTimeout) {
 
         System.out.println("\n[Client] === CROSS: an exChange oRder bOokS Service ===");
         System.out.println("[Client] Digitare 'help' per lista comandi disponibili");
@@ -236,7 +186,7 @@ public class ClientMain {
             System.out.print(">> ");
             String inputLine = userScanner.nextLine().trim();
 
-            // Ignora righe vuote per migliore UX
+            // Ignora righe vuote
             if (inputLine.isEmpty()) {
                 continue;
             }
@@ -264,7 +214,7 @@ public class ClientMain {
                         break;
 
                     case "updatecredentials":
-                        handleUpdateCredentials(parts);
+                        handleUpdateCredentials(parts, serverHost, tcpPort, socketTimeout);
                         break;
 
                     case "esci":
@@ -286,39 +236,24 @@ public class ClientMain {
     /**
      * Mostra l'help con i comandi disponibili
      * Stampa la lista completa dei comandi supportati con sintassi e descrizione
-     * Fornisce reference rapido per l'utente senza dover consultare documentazione
      */
     private static void printHelp() {
         System.out.println("\n=== COMANDI DISPONIBILI ===");
-        System.out.println("help                                              - Mostra questo messaggio");
-        System.out.println("register <username> <password>                    - Registra nuovo utente");
-        System.out.println("login <username> <password>                       - Effettua login");
-        System.out.println("logout                                            - Disconnette dal server");
-        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>  - Aggiorna password");
-        System.out.println("esci                                              - Termina il client");
+        System.out.println("help                                               - Mostra questo messaggio");
+        System.out.println("register <username> <password>                     - Registra nuovo utente");
+        System.out.println("login <username> <password>                        - Effettua login");
+        System.out.println("logout                                             - Disconnette dal server");
+        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>   - Aggiorna password");
+        System.out.println("esci                                               - Termina il client");
         System.out.println();
     }
 
     /**
      * Gestisce la registrazione di un nuovo utente via RMI
-     * Implementa il processo di registrazione secondo le specifiche del vecchio ordinamento
-     *
-     * Flusso di registrazione:
-     * 1. Validazione parametri di input (numero e contenuto)
-     * 2. Lookup del servizio RMI nel registry del server
-     * 3. Chiamata remota al metodo register()
-     * 4. Interpretazione codici di risposta secondo ALLEGATO 1
-     * 5. Feedback utente con messaggi descrittivi
-     *
-     * Codici di risposta gestiti (conformi ALLEGATO 1):
-     * - 100: OK - registrazione completata
-     * - 101: invalid password - password vuota
-     * - 102: username not available - username già esistente
-     * - 103: other error cases - errori generici
      *
      * @param parts comando parsato dall'input utente
      * @param serverHost indirizzo del server per connessione RMI
-     * @param rmiPort porta del registry RMI del server
+     * @param rmiPort porta del registry RMI
      */
     private static void handleRegistration(String[] parts, String serverHost, int rmiPort) {
         try {
@@ -337,29 +272,29 @@ public class ClientMain {
                 return;
             }
 
-            // Connessione RMI per registrazione
+            // Lookup del servizio RMI nel registry del server
             Registry registry = LocateRegistry.getRegistry(serverHost, rmiPort);
-            RegistrazioneRMI rmiService = (RegistrazioneRMI) registry.lookup("server-rmi");
+            RegistrazioneRMI stub = (RegistrazioneRMI) registry.lookup("server-rmi");
 
-            // Chiamata remota al servizio di registrazione
-            int responseCode = rmiService.register(username, password);
+            // Chiamata remota per registrazione
+            int responseCode = stub.register(username, password);
 
-            // Interpretazione e feedback dei codici di risposta secondo ALLEGATO 1
+            // Interpretazione codici di risposta
             switch (responseCode) {
                 case 100:
-                    System.out.println("[Client] Registrazione completata con successo per: " + username);
+                    System.out.println("[Client] Registrazione completata con successo");
                     break;
                 case 101:
-                    System.out.println("[Client] Registrazione fallita: password non valida");
+                    System.out.println("[Client] Errore: password non valida");
                     break;
                 case 102:
-                    System.out.println("[Client] Registrazione fallita: username già esistente");
+                    System.out.println("[Client] Errore: username già esistente");
                     break;
                 case 103:
-                    System.out.println("[Client] Registrazione fallita: errore generico");
+                    System.out.println("[Client] Errore durante registrazione");
                     break;
                 default:
-                    System.out.println("[Client] Registrazione fallita: codice errore sconosciuto " + responseCode);
+                    System.out.println("[Client] Codice di risposta non riconosciuto: " + responseCode);
                     break;
             }
 
@@ -369,19 +304,8 @@ public class ClientMain {
     }
 
     /**
-     * Gestisce il login e stabilisce connessione TCP persistente con il server
-     * Implementa autenticazione e setup sessione secondo il protocollo del progetto
-     *
-     * Flusso di login:
-     * 1. Validazione parametri e controllo stato connessione
-     * 2. Stabilimento connessione TCP con timeout configurato
-     * 3. Setup stream per comunicazione JSON bidirezionale
-     * 4. Costruzione e invio richiesta login JSON conforme ALLEGATO 1
-     * 5. Ricezione e parsing risposta server
-     * 6. Gestione codici di risposta e mantenimento/chiusura connessione
-     *
+     * Gestisce il login utente con connessione TCP persistente
      * La connessione TCP rimane aperta per tutta la sessione utente
-     * fino al logout esplicito o disconnessione
      *
      * @param parts comando parsato dall'input utente
      * @param serverHost indirizzo del server per connessione TCP
@@ -422,7 +346,7 @@ public class ClientMain {
             System.out.println("[Client] Connessione TCP stabilita con " +
                     tcpSocket.getRemoteSocketAddress());
 
-            // Costruzione richiesta di login JSON conforme ALLEGATO 1
+            // Costruzione richiesta di login JSON
             JsonObject loginRequest = new JsonObject();
             loginRequest.addProperty("operation", "login");
 
@@ -468,17 +392,6 @@ public class ClientMain {
 
     /**
      * Gestisce il logout e chiude la connessione TCP
-     * Implementa disconnessione pulita dal server con notifica server-side
-     *
-     * Flusso di logout:
-     * 1. Controllo stato connessione esistente
-     * 2. Invio richiesta logout JSON al server
-     * 3. Ricezione conferma dal server
-     * 4. Chiusura connessione TCP e cleanup stream
-     * 5. Reset stato connessione client
-     *
-     * La connessione viene chiusa indipendentemente dalla risposta server
-     * per garantire cleanup locale anche in caso di problemi di rete
      */
     private static void handleLogout() {
         try {
@@ -521,43 +434,49 @@ public class ClientMain {
     }
 
     /**
-     * Gestisce l'aggiornamento delle credenziali utente
-     * Implementa cambio password tramite connessione TCP esistente o fallisce se non connesso
-     *
-     * Secondo l'ALLEGATO 1, questa operazione deve essere disponibile anche quando
-     * non si è loggati, ma il server verificherà che l'utente NON sia loggato.
-     *
-     * Se il client non è connesso, mostrerà un errore appropriato.
-     * Se il client è connesso ma l'utente specificato è loggato su un'altra connessione,
-     * il server restituirà errore 104.
+     * Gestisce l'aggiornamento delle credenziali utente con connessione temporanea
+     * Crea una connessione TCP dedicata solo per questa operazione,
+     * la chiude automaticamente al termine indipendentemente dal risultato
      *
      * @param parts comando parsato dall'input utente con parametri
+     * @param serverHost indirizzo del server per connessione TCP
+     * @param tcpPort porta TCP del server per connessioni client
+     * @param socketTimeout timeout per socket TCP in millisecondi
      */
-    private static void handleUpdateCredentials(String[] parts) {
-        // Rimuovo il controllo isConnected() per permettere l'operazione
-        // anche quando non si è loggati (conforme ALLEGATO 1)
-
-        if (tcpSocket == null || !tcpSocket.isConnected()) {
-            System.out.println("[Client] Connessione TCP necessaria per updateCredentials. Stabilire prima una connessione con login.");
+    private static void handleUpdateCredentials(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
+        // Validazione numero parametri
+        if (parts.length != 4) {
+            System.out.println("[Client] Uso: updateCredentials <username> <old_password> <new_password>");
             return;
         }
 
+        String username = parts[1];
+        String oldPassword = parts[2];
+        String newPassword = parts[3];
+
+        // Validazione contenuto parametri
+        if (username.isEmpty() || oldPassword.isEmpty() || newPassword.isEmpty()) {
+            System.out.println("[Client] Tutti i parametri sono obbligatori");
+            return;
+        }
+
+        // Variabili per connessione temporanea
+        Socket tempSocket = null;
+        BufferedReader tempIn = null;
+        PrintWriter tempOut = null;
+
         try {
-            // Validazione numero parametri
-            if (parts.length != 4) {
-                System.out.println("[Client] Uso: updateCredentials <username> <old_password> <new_password>");
-                return;
-            }
+            System.out.println("[Client] Stabilendo connessione temporanea per updateCredentials...");
 
-            String username = parts[1];
-            String oldPassword = parts[2];
-            String newPassword = parts[3];
+            // Crea connessione TCP temporanea dedicata
+            tempSocket = new Socket(serverHost, tcpPort);
+            tempSocket.setSoTimeout(socketTimeout);
 
-            // Validazione contenuto parametri
-            if (username.isEmpty() || oldPassword.isEmpty() || newPassword.isEmpty()) {
-                System.out.println("[Client] Tutti i parametri sono obbligatori");
-                return;
-            }
+            // Inizializza stream per comunicazione JSON
+            tempIn = new BufferedReader(new InputStreamReader(tempSocket.getInputStream()));
+            tempOut = new PrintWriter(tempSocket.getOutputStream(), true);
+
+            System.out.println("[Client] Connessione temporanea stabilita con " + tempSocket.getRemoteSocketAddress());
 
             // Costruzione richiesta JSON conforme ALLEGATO 1
             JsonObject request = new JsonObject();
@@ -570,16 +489,16 @@ public class ClientMain {
             request.add("values", values);
 
             // Invio richiesta al server
-            out.println(request.toString());
+            tempOut.println(request.toString());
 
             // Ricezione e parsing risposta del server
-            String responseJson = in.readLine();
+            String responseJson = tempIn.readLine();
             JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
 
             int responseCode = response.get("response").getAsInt();
             String errorMessage = response.get("errorMessage").getAsString();
 
-            // Feedback risultato operazione con interpretazione codici ALLEGATO 1
+            // Feedback risultato operazione con interpretazione codici
             switch (responseCode) {
                 case 100:
                     System.out.println("[Client] Password aggiornata con successo");
@@ -602,15 +521,29 @@ public class ClientMain {
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore aggiornamento credenziali: " + e.getMessage());
+            System.err.println("[Client] Errore durante updateCredentials: " + e.getMessage());
+        } finally {
+            // Cleanup garantito della connessione temporanea
+            try {
+                if (tempOut != null) {
+                    tempOut.close();
+                }
+                if (tempIn != null) {
+                    tempIn.close();
+                }
+                if (tempSocket != null && !tempSocket.isClosed()) {
+                    tempSocket.close();
+                    System.out.println("[Client] Connessione temporanea chiusa");
+                }
+            } catch (IOException e) {
+                // Ignora errori durante cleanup - connessione temporanea
+                System.err.println("[Client] Avviso: errore durante chiusura connessione temporanea: " + e.getMessage());
+            }
         }
     }
 
     /**
      * Verifica se il client è connesso al server
-     * Metodo di utilità per controlli di stato connessione
-     * Fornisce feedback utente se operazione richiede connessione attiva
-     *
      * Controlla sia l'esistenza del socket che lo stato di connessione
      * per gestire correttamente socket chiusi o non inizializzati
      *
@@ -626,41 +559,28 @@ public class ClientMain {
 
     /**
      * Chiude tutte le risorse del client in modo ordinato
-     * Garantisce cleanup completo di tutte le risorse allocate:
-     * - Connessione TCP e stream di comunicazione
-     * - Thread pool con timeout per terminazione graceful
-     * - Scanner input utente
-     * - Flag di stato per terminazione thread
-     *
-     * Questo metodo viene sempre chiamato nel blocco finally del main,
-     * garantendo cleanup anche in caso di eccezioni impreviste.
-     *
-     * Sequenza di shutdown:
-     * 1. Impostazione flag terminazione
-     * 2. Chiusura connessione TCP se attiva
-     * 3. Shutdown graceful thread pool (2 secondi timeout)
-     * 4. Chiusura scanner input
-     * 5. Logging completamento shutdown
+     * Garantisce cleanup completo di tutte le risorse allocate
      */
     private static void shutdownClient() {
-        System.out.println("[Client] === Shutdown Client CROSS ===");
+        System.out.println("[Client] Avvio procedura di shutdown...");
 
+        // Imposta flag di terminazione per tutti i thread
         running = false;
 
-        // Chiude connessione TCP se attiva
-        if (tcpSocket != null && !tcpSocket.isClosed()) {
-            try {
+        // Chiusura connessione TCP se attiva
+        try {
+            if (tcpSocket != null && !tcpSocket.isClosed()) {
                 tcpSocket.close();
                 System.out.println("[Client] Connessione TCP chiusa");
-            } catch (IOException e) {
-                System.err.println("[Client] Errore chiusura TCP: " + e.getMessage());
             }
+        } catch (IOException e) {
+            System.err.println("[Client] Errore chiusura connessione TCP: " + e.getMessage());
         }
 
-        // Shutdown thread pool con timeout
-        if (pool != null) {
-            pool.shutdown();
+        // Shutdown del thread pool
+        if (pool != null && !pool.isShutdown()) {
             try {
+                pool.shutdown();
                 if (!pool.awaitTermination(2, TimeUnit.SECONDS)) {
                     pool.shutdownNow();
                     System.out.println("[Client] Thread pool terminato forzatamente");
@@ -673,9 +593,10 @@ public class ClientMain {
             }
         }
 
-        // Chiude scanner per input utente
+        // Chiusura scanner input
         if (userScanner != null) {
             userScanner.close();
+            System.out.println("[Client] Scanner input chiuso");
         }
 
         System.out.println("[Client] Shutdown completato");
