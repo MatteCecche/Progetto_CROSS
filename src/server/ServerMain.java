@@ -15,28 +15,43 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Classe Main del server CROSS
+ * Classe Main del server CROSS (Cryptocurrency Online Stock Simulator)
  * Implementa un server multithreaded che gestisce:
- * - Registrazioni via RMI
- * - Login e operazioni via TCP
- * - Thread pool per gestire client
- * - Thread per ascoltare comandi da terminale (chiusura)
+ * - Registrazioni via RMI (per studenti vecchio ordinamento)
+ * - Login e operazioni via TCP (connessioni persistenti)
+ * - Thread pool per gestire client multipli concorrentemente
+ * - Thread per ascoltare comandi da terminale (chiusura ordinata)
+ * - Configurazione centralizzata tramite file properties
+ * - Mappa socket-utente per gestione ottimizzata del login/logout
  */
 public class ServerMain {
 
     // Flag volatile per terminazione thread-safe del server
+    // Volatile garantisce visibilità immediata tra thread
     private static volatile boolean running = true;
 
     // Socket principale per connessioni TCP dei client
     private static ServerSocket serverSocket;
 
-    // Thread pool per gestire client multipli
+    // Thread pool per gestire client multipli concorrentemente
+    // CachedThreadPool si adatta automaticamente al carico
     private static ExecutorService pool;
 
     // Mappa thread-safe che associa socket dell'utente al suo username
+    // Utilizzata per gestione efficiente login/logout senza file I/O
     private static final ConcurrentHashMap<Socket, String> socketUserMap = new ConcurrentHashMap<>();
 
-
+    /**
+     * Main del server CROSS - Punto di ingresso dell'applicazione
+     * Orchestratore principale che coordina l'avvio di tutti i servizi:
+     * 1. Caricamento configurazione da file properties
+     * 2. Parsing e validazione parametri
+     * 3. Avvio server RMI per registrazioni
+     * 4. Avvio server TCP per operazioni client
+     * 5. Gestione shutdown ordinato in caso di errori
+     *
+     * @param args argomenti da linea di comando (attualmente non utilizzati)
+     */
     public static void main(String[] args) {
 
         System.out.println("[Server] ==== Avvio Server CROSS ====");
@@ -48,10 +63,10 @@ public class ServerMain {
         } catch (IOException e) {
             System.err.println("[Server] Impossibile caricare configurazione: " + e.getMessage());
             System.exit(1);
-            return;
+            return; // Per sicurezza del compilatore
         }
 
-        // Parsing dei parametri di configurazione
+        // Parsing dei parametri di configurazione con gestione errori
         int tcpPort;
         int rmiPort;
         int socketTimeout;
@@ -63,16 +78,16 @@ public class ServerMain {
         } catch (IllegalArgumentException e) {
             System.err.println("[Server] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
-            return;
+            return; // Per sicurezza del compilatore
         }
 
-        // Stampa configurazione caricata con successo
+        // Stampa configurazione caricata con successo per debug
         System.out.println("[Server] Configurazione caricata correttamente:");
         System.out.println("[Server] - TCP Port: " + tcpPort);
         System.out.println("[Server] - RMI Port: " + rmiPort);
         System.out.println("[Server] - Socket Timeout: " + socketTimeout + "ms");
 
-        // Avvio server RMI per registrazioni
+        // Avvio server RMI per registrazioni (richiesto per vecchio ordinamento)
         try {
             startRMIServer(rmiPort);
         } catch (Exception e) {
@@ -81,7 +96,7 @@ public class ServerMain {
             System.exit(1);
         }
 
-        // Avvio server TCP principale
+        // Avvio server TCP principale per tutte le operazioni client
         try {
             startTCPServer(tcpPort, socketTimeout);
         } catch (IOException e) {
@@ -92,16 +107,22 @@ public class ServerMain {
             e.printStackTrace();
             System.exit(1);
         } finally {
-            // Cleanup finale delle risorse
+            // Cleanup finale delle risorse garantito anche in caso di eccezioni
             shutdownServer();
         }
     }
 
     /**
      * Carica la configurazione dal file server.properties
-     * Il server termina se non trova il file
+     * Legge i parametri di configurazione dal filesystem
+     * Il server termina se non trova il file per evitare configurazioni errate
      *
-     * @return Properties oggetto con la configurazione caricata
+     * Parametri attesi nel file properties:
+     * - TCP.port: porta per connessioni client
+     * - RMI.port: porta per registry RMI
+     * - socket.timeout: timeout connessioni client in millisecondi
+     *
+     * @return Properties oggetto con la configurazione caricata e validata
      * @throws IOException se il file di configurazione non esiste o è illeggibile
      */
     private static Properties loadConfiguration() throws IOException {
@@ -118,19 +139,22 @@ public class ServerMain {
             System.out.println("[Server] Configurazione caricata da: " + configFile.getPath());
         } catch (IOException e) {
             System.err.println("[Server] Errore caricamento configurazione: " + e.getMessage());
-            throw e;
+            throw e; // Rilancia l'eccezione - il server deve terminare
         }
 
         return prop;
     }
 
     /**
-     * Effettua il parsing di un numero intero
+     * Effettua il parsing di un numero intero da Properties
+     * Valida che la property esista e sia un numero intero valido
      * Se la property manca o non è un numero valido, il server termina
      *
-     * @param props oggetto Properties
-     * @param key chiave da cercare
-     * @return valore parsato
+     * Garantisce che tutti i parametri numerici siano validi prima dell'avvio
+     *
+     * @param props oggetto Properties contenente la configurazione
+     * @param key chiave da cercare nel file properties
+     * @return valore parsato come intero
      * @throws IllegalArgumentException se la property manca o è invalida
      */
     private static int parseRequiredIntProperty(Properties props, String key) {
@@ -149,10 +173,17 @@ public class ServerMain {
 
     /**
      * Avvia il server RMI per gestire le registrazioni
+     * Richiesto dalle specifiche per studenti del vecchio ordinamento
      * Il RegistrazioneRMIImpl inizializzerà automaticamente il UserManager
      *
+     * Processo di setup RMI:
+     * 1. Crea implementazione del servizio remoto
+     * 2. Esporta l'oggetto come stub RMI
+     * 3. Crea registry RMI sulla porta specificata
+     * 4. Registra il servizio con nome simbolico
+     *
      * @param rmiPort porta su cui avviare il registry RMI
-     * @throws Exception se errori durante setup RMI
+     * @throws Exception se errori durante setup RMI (registry, binding, export)
      */
     private static void startRMIServer(int rmiPort) throws Exception {
 
@@ -167,9 +198,18 @@ public class ServerMain {
 
     /**
      * Avvia il server TCP principale per gestire connessioni client
+     * Coordina thread pool, listener terminale e loop di accettazione connessioni
+     * Ogni client viene gestito in un thread separato dal pool
+     *
+     * Componenti gestiti:
+     * - CachedThreadPool per scalabilità automatica
+     * - ServerSocket con porta configurabile
+     * - Thread daemon per comandi terminale
+     * - Loop di accettazione con gestione errori
+     * - Timeout configurabile per socket client
      *
      * @param tcpPort porta TCP su cui mettersi in ascolto
-     * @param socketTimeout timeout per i socket client
+     * @param socketTimeout timeout per i socket client in millisecondi
      * @throws IOException se errori nella creazione ServerSocket
      */
     private static void startTCPServer(int tcpPort, int socketTimeout) throws IOException {
@@ -197,6 +237,7 @@ public class ServerMain {
 
                 // Crea handler per questo client e lo sottomette al thread pool
                 // Ogni client viene gestito in un thread separato
+                // Passa la mappa condivisa per gestione login/logout
                 ClientHandler clientHandler = new ClientHandler(clientSocket, socketUserMap);
                 pool.submit(clientHandler);
 
@@ -210,7 +251,15 @@ public class ServerMain {
 
     /**
      * Thread per ascoltare comandi da terminale
-     * Permette chiusura del server digitando "esci"
+     * Implementa interfaccia amministrativa per controllo server
+     * Permette chiusura ordinata del server digitando "esci"
+     * Thread daemon che termina automaticamente con il processo principale
+     *
+     * Comandi supportati:
+     * - "esci": terminazione ordinata del server
+     * - altri comandi: messaggio di errore e help
+     *
+     * Utilizza prompt ">>" per coerenza con interfaccia client
      */
     private static void listenForTerminalCommands() {
         Scanner scanner = new Scanner(System.in);
@@ -227,7 +276,7 @@ public class ServerMain {
                 if ("esci".equals(command)) {
                     System.out.println("[Server] Comando di arresto ricevuto...");
 
-                    // Imposta flag per terminazione
+                    // Imposta flag per terminazione thread-safe
                     running = false;
 
                     // Forza chiusura server socket per uscire da accept()
@@ -251,8 +300,19 @@ public class ServerMain {
     }
 
     /**
-     * Effettua chiusura del server
-     * Chiude tutte le risorse in modo ordinato
+     * Effettua chiusura ordinata del server
+     * Garantisce terminazione pulita di tutte le risorse:
+     * - ServerSocket per fermare nuove connessioni
+     * - Thread pool con timeout per client attivi
+     * - Cleanup generale e terminazione processo
+     *
+     * Sequenza di shutdown:
+     * 1. Chiusura ServerSocket (ferma nuove connessioni)
+     * 2. Shutdown graceful del thread pool (5 secondi timeout)
+     * 3. Shutdown forzato se necessario
+     * 4. Terminazione processo con System.exit()
+     *
+     * Garantisce che il server termini senza leak di risorse
      */
     private static void shutdownServer() {
         System.out.println("[Server] Chiusura del server in corso...");
