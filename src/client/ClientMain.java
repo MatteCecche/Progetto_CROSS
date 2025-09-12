@@ -217,6 +217,22 @@ public class ClientMain {
                         handleUpdateCredentials(parts, serverHost, tcpPort, socketTimeout);
                         break;
 
+                    case "insertlimitorder":
+                        handleInsertLimitOrder(parts);
+                        break;
+                    case "insertmarketorder":
+                        handleInsertMarketOrder(parts);
+                        break;
+                    case "insertstoporder":
+                        handleInsertStopOrder(parts);
+                        break;
+                    case "cancelorder":
+                        handleCancelOrder(parts);
+                        break;
+                    case "marketprice":
+                        handleMarketPrice();
+                        break;
+
                     case "esci":
                         System.out.println("[Client] Chiusura client...");
                         running = false;
@@ -240,10 +256,19 @@ public class ClientMain {
     private static void printHelp() {
         System.out.println("\n=== COMANDI DISPONIBILI ===");
         System.out.println("help                                               - Mostra questo messaggio");
-        System.out.println("register <username> <password>                     - Registra nuovo utente");
-        System.out.println("login <username> <password>                        - Effettua login");
+        System.out.println("register <username> <password>                    - Registra nuovo utente");
+        System.out.println("login <username> <password>                       - Effettua login");
         System.out.println("logout                                             - Disconnette dal server");
-        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>   - Aggiorna password");
+        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>  - Aggiorna password");
+        System.out.println();
+        System.out.println("=== COMANDI TRADING (richiede login) ===");
+        System.out.println("insertLimitOrder <bid/ask> <size> <price>          - Inserisce ordine limite");
+        System.out.println("insertMarketOrder <bid/ask> <size>                 - Inserisce ordine a mercato");
+        System.out.println("insertStopOrder <bid/ask> <size> <stopPrice>       - Inserisce stop order");
+        System.out.println("cancelOrder <orderId>                              - Cancella ordine");
+        System.out.println("marketPrice                                        - Mostra prezzo corrente BTC");
+        System.out.println();
+        System.out.println("NOTA: size e price in millesimi (es: 1000 = 1 BTC, 58000000 = 58.000 USD)");
         System.out.println("esci                                               - Termina il client");
         System.out.println();
     }
@@ -540,6 +565,332 @@ public class ClientMain {
                 System.err.println("[Client] Avviso: errore durante chiusura connessione temporanea: " + e.getMessage());
             }
         }
+    }
+
+    /**
+     * Gestisce il comando insertLimitOrder dal client
+     * Sintassi: insertLimitOrder <bid/ask> <size> <price>
+     *
+     * @param parts comando parsato dall'input utente
+     */
+    private static void handleInsertLimitOrder(String[] parts) {
+        try {
+            // Validazione numero parametri
+            if (parts.length != 4) {
+                System.out.println("[Client] Uso: insertLimitOrder <bid/ask> <size> <price>");
+                System.out.println("[Client] Esempio: insertLimitOrder bid 1000 58000000  (compra 1 BTC a 58.000 USD)");
+                return;
+            }
+
+            // Controllo connessione attiva
+            if (!isConnected()) {
+                return;
+            }
+
+            String type = parts[1].toLowerCase();
+            String sizeStr = parts[2];
+            String priceStr = parts[3];
+
+            // Validazione type
+            if (!type.equals("bid") && !type.equals("ask")) {
+                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
+                return;
+            }
+
+            // Parsing numeri
+            int size, price;
+            try {
+                size = Integer.parseInt(sizeStr);
+                price = Integer.parseInt(priceStr);
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] Size e price devono essere numeri interi (millesimi)");
+                return;
+            }
+
+            // Validazione valori
+            if (size <= 0 || price <= 0) {
+                System.out.println("[Client] Size e price devono essere maggiori di zero");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "insertLimitOrder");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("type", type);
+            values.addProperty("size", size);
+            values.addProperty("price", price);
+            request.add("values", values);
+
+            // Invio richiesta e ricezione risposta
+            out.println(request.toString());
+            String responseJson = in.readLine();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+
+            // Parsing risposta secondo formato ALLEGATO 1
+            int orderId = response.get("orderId").getAsInt();
+
+            if (orderId != -1) {
+                System.out.println("[Client] Limit Order inserito con successo - ID: " + orderId);
+                System.out.println("[Client] " + (type.equals("bid") ? "Acquisto" : "Vendita") + " di " +
+                        formatSize(size) + " BTC a " + formatPrice(price) + " USD");
+            } else {
+                System.out.println("[Client] Errore inserimento Limit Order - verificare parametri e liquidità");
+            }
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante insertLimitOrder: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gestisce il comando insertMarketOrder dal client
+     * Sintassi: insertMarketOrder <bid/ask> <size>
+     *
+     * @param parts comando parsato dall'input utente
+     */
+    private static void handleInsertMarketOrder(String[] parts) {
+        try {
+            // Validazione numero parametri
+            if (parts.length != 3) {
+                System.out.println("[Client] Uso: insertMarketOrder <bid/ask> <size>");
+                System.out.println("[Client] Esempio: insertMarketOrder ask 500  (vendi 0.5 BTC al prezzo di mercato)");
+                return;
+            }
+
+            // Controllo connessione attiva
+            if (!isConnected()) {
+                return;
+            }
+
+            String type = parts[1].toLowerCase();
+            String sizeStr = parts[2];
+
+            // Validazione type
+            if (!type.equals("bid") && !type.equals("ask")) {
+                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
+                return;
+            }
+
+            // Parsing size
+            int size;
+            try {
+                size = Integer.parseInt(sizeStr);
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] Size deve essere un numero intero (millesimi)");
+                return;
+            }
+
+            // Validazione size
+            if (size <= 0) {
+                System.out.println("[Client] Size deve essere maggiore di zero");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "insertMarketOrder");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("type", type);
+            values.addProperty("size", size);
+            request.add("values", values);
+
+            // Invio richiesta e ricezione risposta
+            out.println(request.toString());
+            String responseJson = in.readLine();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+
+            // Parsing risposta secondo formato ALLEGATO 1
+            int orderId = response.get("orderId").getAsInt();
+
+            if (orderId != -1) {
+                System.out.println("[Client] Market Order eseguito con successo - ID: " + orderId);
+                System.out.println("[Client] " + (type.equals("bid") ? "Acquistato" : "Venduto") + " " +
+                        formatSize(size) + " BTC al prezzo di mercato");
+            } else {
+                System.out.println("[Client] Errore esecuzione Market Order - liquidità insufficiente nell'order book");
+            }
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante insertMarketOrder: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gestisce il comando insertStopOrder dal client
+     * Sintassi: insertStopOrder <bid/ask> <size> <stopPrice>
+     *
+     * @param parts comando parsato dall'input utente
+     */
+    private static void handleInsertStopOrder(String[] parts) {
+        try {
+            // Validazione numero parametri
+            if (parts.length != 4) {
+                System.out.println("[Client] Uso: insertStopOrder <bid/ask> <size> <stopPrice>");
+                System.out.println("[Client] Esempio: insertStopOrder ask 1000 55000000  (stop loss: vendi 1 BTC se prezzo <= 55.000)");
+                return;
+            }
+
+            // Controllo connessione attiva
+            if (!isConnected()) {
+                return;
+            }
+
+            String type = parts[1].toLowerCase();
+            String sizeStr = parts[2];
+            String stopPriceStr = parts[3];
+
+            // Validazione type
+            if (!type.equals("bid") && !type.equals("ask")) {
+                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
+                return;
+            }
+
+            // Parsing numeri
+            int size, stopPrice;
+            try {
+                size = Integer.parseInt(sizeStr);
+                stopPrice = Integer.parseInt(stopPriceStr);
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] Size e stopPrice devono essere numeri interi (millesimi)");
+                return;
+            }
+
+            // Validazione valori
+            if (size <= 0 || stopPrice <= 0) {
+                System.out.println("[Client] Size e stopPrice devono essere maggiori di zero");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "insertStopOrder");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("type", type);
+            values.addProperty("size", size);
+            values.addProperty("price", stopPrice); // Nel JSON si chiama "price" ma è il stopPrice
+            request.add("values", values);
+
+            // Invio richiesta e ricezione risposta
+            out.println(request.toString());
+            String responseJson = in.readLine();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+
+            // Parsing risposta secondo formato ALLEGATO 1
+            int orderId = response.get("orderId").getAsInt();
+
+            if (orderId != -1) {
+                System.out.println("[Client] Stop Order inserito con successo - ID: " + orderId);
+                System.out.println("[Client] " + (type.equals("bid") ? "Stop buy" : "Stop loss") + ": " +
+                        formatSize(size) + " BTC quando prezzo " +
+                        (type.equals("bid") ? ">=" : "<=") + " " + formatPrice(stopPrice) + " USD");
+            } else {
+                System.out.println("[Client] Errore inserimento Stop Order - verificare stopPrice vs prezzo corrente");
+            }
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante insertStopOrder: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Gestisce il comando cancelOrder dal client
+     * Sintassi: cancelOrder <orderId>
+     *
+     * @param parts comando parsato dall'input utente
+     */
+    private static void handleCancelOrder(String[] parts) {
+        try {
+            // Validazione numero parametri
+            if (parts.length != 2) {
+                System.out.println("[Client] Uso: cancelOrder <orderId>");
+                return;
+            }
+
+            // Controllo connessione attiva
+            if (!isConnected()) {
+                return;
+            }
+
+            String orderIdStr = parts[1];
+
+            // Parsing orderId
+            int orderId;
+            try {
+                orderId = Integer.parseInt(orderIdStr);
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] OrderId deve essere un numero intero");
+                return;
+            }
+
+            if (orderId <= 0) {
+                System.out.println("[Client] OrderId deve essere maggiore di zero");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "cancelOrder");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("orderId", orderId);
+            request.add("values", values);
+
+            // Invio richiesta e ricezione risposta
+            out.println(request.toString());
+            String responseJson = in.readLine();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+
+            // Parsing risposta secondo formato ALLEGATO 1 (come updateCredentials)
+            int responseCode = response.get("response").getAsInt();
+            String errorMessage = response.get("errorMessage").getAsString();
+
+            // Interpretazione codici risposta secondo ALLEGATO 1
+            switch (responseCode) {
+                case 100:
+                    System.out.println("[Client] Ordine " + orderId + " cancellato con successo");
+                    break;
+                case 101:
+                    System.out.println("[Client] Impossibile cancellare ordine " + orderId +
+                            " - ordine non esistente, già eseguito o non di proprietà");
+                    break;
+                default:
+                    System.out.println("[Client] Errore cancellazione ordine " + orderId +
+                            " (codice " + responseCode + "): " + errorMessage);
+                    break;
+            }
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante cancelOrder: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Mostra il prezzo corrente di mercato del BTC
+     * Comando locale - non richiede comunicazione con server
+     */
+    private static void handleMarketPrice() {
+        System.out.println("[Client] Comando locale - per il prezzo corrente consultare il server dopo un trade");
+        System.out.println("[Client] Il prezzo viene aggiornato ad ogni esecuzione di ordini");
+    }
+
+// ✅ METODI HELPER AGGIUNTIVI (da aggiungere alla classe ClientMain)
+
+    /**
+     * Formatta size in millesimi per display utente (es: 1000 -> "1.000 BTC")
+     */
+    private static String formatSize(int sizeInMilliths) {
+        return String.format("%.3f", sizeInMilliths / 1000.0);
+    }
+
+    /**
+     * Formatta price in millesimi per display utente (es: 58000000 -> "58,000.000 USD")
+     */
+    private static String formatPrice(int priceInMilliths) {
+        return String.format("%,.3f", priceInMilliths / 1000.0);
     }
 
     /**

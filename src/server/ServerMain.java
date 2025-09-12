@@ -86,6 +86,7 @@ public class ServerMain {
         // Avvio server RMI per registrazioni
         try {
             startRMIServer(rmiPort);
+            OrderManager.initialize();
         } catch (Exception e) {
             System.err.println("[Server] Errore avvio connessione RMI: " + e.getMessage());
             e.printStackTrace();
@@ -156,21 +157,36 @@ public class ServerMain {
     }
 
     /**
-     * Avvia il server RMI per gestire le registrazioni
-     * Il RegistrazioneRMIImpl inizializzerà automaticamente il UserManager
+     * Avvia il server RMI per gestire le registrazioni utenti
+     * Segue il pattern delle slide RMI per setup corretto con UnicastRemoteObject
+     *
+     * IMPORTANTE: Dal momento che RegistrazioneRMIImpl estende già UnicastRemoteObject,
+     * NON è necessario chiamare exportObject() - l'export avviene automaticamente
+     * nel costruttore di UnicastRemoteObject
      *
      * @param rmiPort porta su cui avviare il registry RMI
-     * @throws Exception se errori durante setup RMI (registry, binding, export)
+     * @throws Exception se errori durante setup RMI (registry, binding)
      */
     private static void startRMIServer(int rmiPort) throws Exception {
 
+        // Step 1: Istanzia l'oggetto remoto (secondo slide RMI)
+        // Il costruttore di RegistrazioneRMIImpl chiama super() di UnicastRemoteObject
+        // che esporta automaticamente l'oggetto creando lo stub
         RegistrazioneRMIImpl rmiImpl = new RegistrazioneRMIImpl();
-        RegistrazioneRMI stub = (RegistrazioneRMI) java.rmi.server.UnicastRemoteObject.exportObject(rmiImpl, 0);
+
+        // Step 2: Crea il registry sulla porta specificata (secondo slide)
         LocateRegistry.createRegistry(rmiPort);
+
+        // Step 3: Ottiene riferimento al registry appena creato
         Registry registry = LocateRegistry.getRegistry(rmiPort);
-        registry.rebind("server-rmi", stub);
+
+        // Step 4: Registra il servizio nel registry con nome "server-rmi"
+        // Non serve cast perché RegistrazioneRMIImpl implementa già RegistrazioneRMI
+        // e UnicastRemoteObject gestisce automaticamente lo stub
+        registry.rebind("server-rmi", rmiImpl);
 
         System.out.println("[Server] Server RMI attivo sulla porta " + rmiPort);
+        System.out.println("[Server] Servizio registrazione disponibile come 'server-rmi'");
     }
 
     /**
@@ -310,5 +326,6 @@ public class ServerMain {
         }
 
         System.out.println("[Server] Server terminato correttamente.");
+        System.exit(0);
     }
 }
