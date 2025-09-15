@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import server.utility.UserManager;
+import com.google.gson.JsonArray;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -169,6 +170,8 @@ public class ClientHandler implements Runnable {
                 return handleInsertStopOrder(request);
             case "cancelOrder":
                 return handleCancelOrder(request);
+            case "getPriceHistory":
+                return handleGetPriceHistory(request);
 
             default:
                 return createErrorResponse(103, "Operazione non supportata: " + operation);
@@ -507,6 +510,191 @@ public class ClientHandler implements Runnable {
             System.err.println("[ClientHandler] Errore durante cancelOrder: " + e.getMessage());
             return createErrorResponse(101, "Errore interno durante cancellazione ordine");
         }
+    }
+
+    /**
+     * Gestisce la richiesta getPriceHistory dal client
+     * Calcola dati OHLC (Open, High, Low, Close) per ogni giorno del mese richiesto
+     * Formato richiesta ALLEGATO 1: month=STRING(MMYYYY)
+     * Formato risposta definito dallo studente: array con dati giornalieri OHLC
+     *
+     * @param request oggetto JSON con month nel campo "values"
+     * @return JsonObject con priceHistory array o messaggio errore
+     */
+    private JsonObject handleGetPriceHistory(JsonObject request) {
+        try {
+            // Controllo autenticazione utente
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
+                return createPriceHistoryErrorResponse("Utente non loggato");
+            }
+
+            if (!request.has("values")) {
+                return createPriceHistoryErrorResponse("Messaggio getPriceHistory non valido: manca campo values");
+            }
+
+            JsonObject values = request.getAsJsonObject("values");
+            String month = getStringValue(values, "month");
+
+            // Validazione formato mese
+            if (month == null || !isValidMonthFormat(month)) {
+                return createPriceHistoryErrorResponse("Formato mese non valido. Usare MMYYYY (es: 012025)");
+            }
+
+            System.out.println("[ClientHandler] Richiesta dati storici per mese " + month + " da utente: " + username);
+
+            // Calcolo dati OHLC per il mese richiesto
+            JsonArray priceHistory = calculateOHLC(month);
+
+            if (priceHistory.size() == 0) {
+                return createPriceHistoryErrorResponse("Nessun dato storico disponibile per il mese " + month);
+            }
+
+            // Creazione risposta con dati storici
+            JsonObject response = new JsonObject();
+            response.add("priceHistory", priceHistory);
+
+            System.out.println("[ClientHandler] Inviati " + priceHistory.size() +
+                    " giorni di dati storici per mese " + month + " a: " + username);
+
+            return response;
+
+        } catch (Exception e) {
+            System.err.println("[ClientHandler] Errore durante getPriceHistory: " + e.getMessage());
+            return createPriceHistoryErrorResponse("Errore interno del server durante recupero dati storici");
+        }
+    }
+
+    /**
+     * Calcola dati OHLC per il mese specificato dai trade eseguiti
+     * Legge i trade salvati e calcola per ogni giorno: apertura, massimo, minimo, chiusura
+     *
+     * @param month formato MMYYYY (es: "012025" per gennaio 2025)
+     * @return JsonArray con dati giornalieri OHLC
+     */
+    private JsonArray calculateOHLC(String month) {
+        try {
+            // Lettura trade eseguiti dal file JSON (implementazione futura)
+            // Per ora generiamo dati di esempio per test
+            return generateSampleOHLC(month);
+
+        /* TODO: Implementazione completa quando avremo il salvataggio trade
+        JsonArray executedTrades = OrderManager.getExecutedTradesForMonth(month);
+        return computeOHLCFromTrades(executedTrades, month);
+        */
+
+        } catch (Exception e) {
+            System.err.println("[ClientHandler] Errore calcolo OHLC per mese " + month + ": " + e.getMessage());
+            return new JsonArray();
+        }
+    }
+
+    /**
+     * Genera dati OHLC di esempio per test (da sostituire con dati reali)
+     *
+     * @param month formato MMYYYY
+     * @return JsonArray con dati di esempio
+     */
+    private JsonArray generateSampleOHLC(String month) {
+        JsonArray priceHistory = new JsonArray();
+
+        try {
+            int mm = Integer.parseInt(month.substring(0, 2));
+            int yyyy = Integer.parseInt(month.substring(2, 6));
+
+            // Calcolo giorni nel mese
+            int daysInMonth = getDaysInMonth(mm, yyyy);
+
+            // Prezzo base BTC (circa 58.000 USD in millesimi)
+            int basePrice = 58000000;
+
+            for (int day = 1; day <= daysInMonth; day++) {
+                JsonObject dayData = new JsonObject();
+
+                // Formato data DD/MM/YYYY
+                String date = String.format("%02d/%02d/%04d", day, mm, yyyy);
+
+                // Simulazione prezzi OHLC con variazioni casuali
+                int open = basePrice + (int)(Math.random() * 2000000 - 1000000);  // ±1000 USD
+                int high = open + (int)(Math.random() * 1500000);                 // +0-1500 USD
+                int low = open - (int)(Math.random() * 1500000);                  // -0-1500 USD
+                int close = low + (int)(Math.random() * (high - low));           // tra low e high
+
+                dayData.addProperty("date", date);
+                dayData.addProperty("open", open);
+                dayData.addProperty("high", high);
+                dayData.addProperty("low", low);
+                dayData.addProperty("close", close);
+
+                priceHistory.add(dayData);
+            }
+
+        } catch (Exception e) {
+            System.err.println("[ClientHandler] Errore generazione dati esempio: " + e.getMessage());
+        }
+
+        return priceHistory;
+    }
+
+    /**
+     * Calcola il numero di giorni nel mese specificato
+     *
+     * @param month mese (1-12)
+     * @param year anno
+     * @return numero di giorni nel mese
+     */
+    private int getDaysInMonth(int month, int year) {
+        int[] daysInMonth = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+        // Gestione anno bisestile
+        if (month == 2 && isLeapYear(year)) {
+            return 29;
+        }
+
+        return daysInMonth[month];
+    }
+
+    /**
+     * Verifica se un anno è bisestile
+     *
+     * @param year anno da verificare
+     * @return true se bisestile, false altrimenti
+     */
+    private boolean isLeapYear(int year) {
+        return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    }
+
+    /**
+     * Valida il formato del mese MMYYYY
+     *
+     * @param month stringa da validare
+     * @return true se formato corretto, false altrimenti
+     */
+    private boolean isValidMonthFormat(String month) {
+        if (month == null || month.length() != 6) {
+            return false;
+        }
+
+        try {
+            int mm = Integer.parseInt(month.substring(0, 2));
+            int yyyy = Integer.parseInt(month.substring(2, 6));
+
+            return mm >= 1 && mm <= 12 && yyyy >= 2020 && yyyy <= 2030;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Crea risposta di errore per getPriceHistory
+     *
+     * @param errorMessage messaggio di errore
+     * @return JsonObject con campo error
+     */
+    private JsonObject createPriceHistoryErrorResponse(String errorMessage) {
+        JsonObject response = new JsonObject();
+        response.addProperty("error", errorMessage);
+        return response;
     }
 
     // =============== UTILITY METHODS ===============

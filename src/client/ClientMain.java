@@ -14,6 +14,7 @@ import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import com.google.gson.JsonArray;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -231,6 +232,9 @@ public class ClientMain {
                         break;
                     case "marketprice":
                         handleMarketPrice();
+                        break;
+                    case "getpricehistory":
+                        handleGetPriceHistory(parts);
                         break;
 
                     case "esci":
@@ -866,6 +870,139 @@ public class ClientMain {
         } catch (Exception e) {
             System.err.println("[Client] Errore durante cancelOrder: " + e.getMessage());
         }
+    }
+
+    /**
+     * Gestisce il comando getPriceHistory dal client
+     * Sintassi: getPriceHistory <MMYYYY>
+     *
+     * @param parts comando parsato dall'input utente
+     */
+    private static void handleGetPriceHistory(String[] parts) {
+        try {
+            // Validazione numero parametri
+            if (parts.length != 2) {
+                System.out.println("[Client] Uso: getPriceHistory <MMYYYY>");
+                System.out.println("[Client] Esempio: getPriceHistory 012025  (gennaio 2025)");
+                return;
+            }
+
+            // Controllo connessione attiva
+            if (!isConnected()) {
+                return;
+            }
+
+            String month = parts[1];
+
+            // Validazione formato mese (MMYYYY)
+            if (!isValidMonthFormat(month)) {
+                System.out.println("[Client] Formato mese non valido. Usare MMYYYY (es: 012025 per gennaio 2025)");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "getPriceHistory");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("month", month);
+            request.add("values", values);
+
+            System.out.println("[Client] Richiesta dati storici per: " + formatMonthDisplay(month));
+
+            // Invio richiesta e ricezione risposta
+            out.println(request.toString());
+            String responseJson = in.readLine();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+
+            // Parsing risposta - formato definito dallo studente
+            if (response.has("error")) {
+                String errorMessage = response.get("error").getAsString();
+                System.out.println("[Client] Errore recupero dati storici: " + errorMessage);
+                return;
+            }
+
+            if (response.has("priceHistory")) {
+                displayPriceHistory(response.getAsJsonArray("priceHistory"), month);
+            } else {
+                System.out.println("[Client] Nessun dato storico disponibile per " + formatMonthDisplay(month));
+            }
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante getPriceHistory: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Valida il formato del mese MMYYYY
+     *
+     * @param month stringa da validare
+     * @return true se formato corretto, false altrimenti
+     */
+    private static boolean isValidMonthFormat(String month) {
+        if (month == null || month.length() != 6) {
+            return false;
+        }
+
+        try {
+            int mm = Integer.parseInt(month.substring(0, 2));
+            int yyyy = Integer.parseInt(month.substring(2, 6));
+
+            return mm >= 1 && mm <= 12 && yyyy >= 2020 && yyyy <= 2030;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Formatta il mese per display utente
+     *
+     * @param month formato MMYYYY
+     * @return stringa formattata per display
+     */
+    private static String formatMonthDisplay(String month) {
+        if (month.length() != 6) return month;
+
+        String[] monthNames = {"", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+                "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"};
+
+        try {
+            int mm = Integer.parseInt(month.substring(0, 2));
+            int yyyy = Integer.parseInt(month.substring(2, 6));
+            return monthNames[mm] + " " + yyyy;
+        } catch (Exception e) {
+            return month;
+        }
+    }
+
+    /**
+     * Visualizza i dati storici OHLC in formato tabellare
+     *
+     * @param priceHistory array JSON con i dati storici
+     * @param month mese richiesto (MMYYYY)
+     */
+    private static void displayPriceHistory(JsonArray priceHistory, String month) {
+        System.out.println("[Client] Dati storici per " + formatMonthDisplay(month) + ":");
+        System.out.println("");
+        System.out.println("┌────────────┬─────────────┬─────────────┬─────────────┬─────────────┐");
+        System.out.println("│    Data    │   Apertura  │   Massimo   │   Minimo    │  Chiusura   │");
+        System.out.println("├────────────┼─────────────┼─────────────┼─────────────┼─────────────┤");
+
+        for (int i = 0; i < priceHistory.size(); i++) {
+            JsonObject dayData = priceHistory.get(i).getAsJsonObject();
+
+            String date = dayData.get("date").getAsString();
+            double open = dayData.get("open").getAsDouble() / 1000.0;    // Conversione da millesimi
+            double high = dayData.get("high").getAsDouble() / 1000.0;    // Conversione da millesimi
+            double low = dayData.get("low").getAsDouble() / 1000.0;      // Conversione da millesimi
+            double close = dayData.get("close").getAsDouble() / 1000.0;  // Conversione da millesimi
+
+            System.out.printf("│ %10s │ %9.3f $ │ %9.3f $ │ %9.3f $ │ %9.3f $ │%n",
+                    date, open, high, low, close);
+        }
+
+        System.out.println("└────────────┴─────────────┴─────────────┴─────────────┴─────────────┘");
+        System.out.println("[Client] Visualizzati " + priceHistory.size() + " giorni di dati storici");
     }
 
     /**
