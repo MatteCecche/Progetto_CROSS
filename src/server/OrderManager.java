@@ -23,6 +23,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - Matching engine per esecuzione automatica ordini
  * - Generazione orderId univoci e thread-safe
  * - Persistenza ordini eseguiti in formato JSON
+ * - Notifiche multicast per soglie prezzo (vecchio ordinamento)
  * - Notifiche per ordini finalizzati
  *
  * Utilizza strutture thread-safe per gestione concorrente di ordini multipli
@@ -329,7 +330,8 @@ public class OrderManager {
 
     private static boolean hasLiquidity(String type, int requiredSize) {
         // Market buy ha bisogno di ask orders, market sell ha bisogno di bid orders
-        Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(type) ? askOrders : bidOrders;
+        Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(type) ?
+                askOrders : bidOrders;
 
         int availableSize = 0;
         for (LinkedList<Order> ordersAtPrice : bookToCheck.values()) {
@@ -359,7 +361,8 @@ public class OrderManager {
                 return stopOrders.remove(order.getOrderId()) != null;
             }
 
-            Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ? bidOrders : askOrders;
+            Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ?
+                    bidOrders : askOrders;
             LinkedList<Order> ordersAtPrice = book.get(order.getPrice());
 
             if (ordersAtPrice != null) {
@@ -433,7 +436,8 @@ public class OrderManager {
      * Esegue un Market Order contro l'order book
      */
     private static void executeMarketOrder(Order marketOrder) {
-        Map<Integer, LinkedList<Order>> oppositeBook = "bid".equals(marketOrder.getType()) ? askOrders : bidOrders;
+        Map<Integer, LinkedList<Order>> oppositeBook = "bid".equals(marketOrder.getType()) ?
+                askOrders : bidOrders;
 
         // Ordina prezzi per esecuzione ottimale
         List<Integer> sortedPrices = new ArrayList<>(oppositeBook.keySet());
@@ -473,21 +477,39 @@ public class OrderManager {
 
     /**
      * Esegue un singolo trade tra due ordini
+     * ✅ INTEGRAZIONE MULTICAST: Notifica cambio prezzo per soglie (vecchio ordinamento)
      */
     private static void executeTrade(Order bidOrder, Order askOrder, int executionPrice) {
-        int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
+        try {
+            int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
 
-        bidOrder.setRemainingSize(bidOrder.getRemainingSize() - tradeSize);
-        askOrder.setRemainingSize(askOrder.getRemainingSize() - tradeSize);
+            bidOrder.setRemainingSize(bidOrder.getRemainingSize() - tradeSize);
+            askOrder.setRemainingSize(askOrder.getRemainingSize() - tradeSize);
 
-        // Aggiorna prezzo di mercato
-        currentMarketPrice = executionPrice;
+            // Salva prezzo precedente per controllo cambiamenti
+            int oldPrice = currentMarketPrice;
 
-        System.out.println("[OrderManager] TRADE ESEGUITO: " + formatSize(tradeSize) + " BTC @ " + formatPrice(executionPrice) + " USD " +
-                "(" + bidOrder.getUsername() + " buy, " + askOrder.getUsername() + " sell)");
+            // Aggiorna prezzo di mercato corrente
+            currentMarketPrice = executionPrice;
 
-        // Salva trade per storico (TODO: implementare persistenza trade)
-        saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
+            System.out.println("[OrderManager] TRADE ESEGUITO: " + formatSize(tradeSize) + " BTC @ " + formatPrice(executionPrice) + " USD " +
+                    "(" + bidOrder.getUsername() + " buy, " + askOrder.getUsername() + " sell)");
+
+            // ✅ INTEGRAZIONE MULTICAST: Controllo soglie prezzo per notifiche multicast
+            // Solo se il prezzo è effettivamente cambiato (evita notifiche duplicate)
+            if (oldPrice != currentMarketPrice) {
+                System.out.println("[OrderManager] Prezzo aggiornato: " + formatPrice(oldPrice) + " → " + formatPrice(currentMarketPrice) + " USD");
+
+                // Chiama servizio multicast per controllo soglie utenti (vecchio ordinamento)
+                PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
+            }
+
+            // Salva trade per storico (TODO: implementare persistenza trade)
+            saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
+
+        } catch (Exception e) {
+            System.err.println("[OrderManager] Errore esecuzione trade: " + e.getMessage());
+        }
     }
 
     /**
@@ -532,7 +554,7 @@ public class OrderManager {
     }
 
     private static String formatPrice(int priceInMilliths) {
-        return String.format("%.3f", priceInMilliths / 1000.0);
+        return String.format("%,.0f", priceInMilliths / 1000.0);
     }
 
     private static String formatSize(int sizeInMilliths) {
@@ -556,7 +578,9 @@ public class OrderManager {
     }
 
     /**
-     * Getter per prezzo corrente (per uso esterno)
+     * Ottiene il prezzo corrente di mercato BTC
+     *
+     * @return prezzo corrente in millesimi USD
      */
     public static int getCurrentMarketPrice() {
         return currentMarketPrice;

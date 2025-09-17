@@ -6,7 +6,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import server.utility.UserManager;
-import com.google.gson.JsonArray;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -22,6 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Gestione del protocollo di comunicazione JSON con il client
  * - Implementazione delle operazioni di autenticazione e gestione account
  * - Sistema di trading completo con OrderManager integration
+ * - Registrazione notifiche prezzo multicast (vecchio ordinamento)
  * - Sincronizzazione con la mappa globale socket-utente per stato login
  * - Gestione robusta degli errori e cleanup delle risorse
  *
@@ -127,7 +127,7 @@ public class ClientHandler implements Runnable {
                 System.out.println("[ClientHandler] Operazione ricevuta: " + operation +
                         " da " + getClientInfo());
 
-                // Dispatch dell'operazione handler specifico
+                // Dispatch dell'operazione al handler specifico
                 JsonObject response = processOperation(operation, request);
 
                 // Invio della risposta JSON al client
@@ -152,8 +152,9 @@ public class ClientHandler implements Runnable {
      * @return JsonObject contenente la risposta da inviare al client
      */
     private JsonObject processOperation(String operation, JsonObject request) {
-        // Switch compatibile Java 8 - ESTESO con operazioni trading
+        // Switch compatibile Java 8 - ESTESO con operazioni trading e multicast
         switch (operation) {
+            // === OPERAZIONI AUTENTICAZIONE ===
             case "login":
                 return handleLogin(request);
             case "logout":
@@ -161,7 +162,7 @@ public class ClientHandler implements Runnable {
             case "updateCredentials":
                 return handleUpdateCredentials(request);
 
-            // ✅ OPERAZIONI TRADING
+            // === OPERAZIONI TRADING ===
             case "insertLimitOrder":
                 return handleInsertLimitOrder(request);
             case "insertMarketOrder":
@@ -173,10 +174,16 @@ public class ClientHandler implements Runnable {
             case "getPriceHistory":
                 return handleGetPriceHistory(request);
 
+            // === NOTIFICHE PREZZO MULTICAST (VECCHIO ORDINAMENTO) ===
+            case "registerPriceAlert":
+                return handleRegisterPriceAlert(request);
+
             default:
                 return createErrorResponse(103, "Operazione non supportata: " + operation);
         }
     }
+
+    // === OPERAZIONI AUTENTICAZIONE ===
 
     /**
      * Gestisce il login del client
@@ -199,33 +206,21 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(103, "Parametri login non validi");
             }
 
-            // Carica utenti e cerca l'utente nel sistema
-            JsonArray users = UserManager.loadUsers();
-            JsonObject user = UserManager.findUser(users, username);
-
-            if (user == null) {
-                System.out.println("[ClientHandler] Login fallito: utente non esistente - " + username);
-                return createErrorResponse(101, "Username/password non corrispondenti");
-            }
-
-            // Verifica password
-            String storedPassword = user.get("password").getAsString();
-            if (!storedPassword.equals(password)) {
-                System.out.println("[ClientHandler] Login fallito: password errata - " + username);
-                return createErrorResponse(101, "Username/password non corrispondenti");
-            }
-
-            // Controlla se utente già loggato su altra connessione
-            if (socketUserMap.containsValue(username)) {
-                System.out.println("[ClientHandler] Login fallito: utente già loggato - " + username);
+            // Controllo se l'utente è già loggato (usando la mappa condivisa)
+            if (isUserAlreadyLoggedIn(username)) {
                 return createErrorResponse(102, "Utente già loggato");
             }
 
-            // Registra associazione socket -> username per tracking stato
-            socketUserMap.put(clientSocket, username);
+            // Verifica credenziali tramite UserManager
+            if (!UserManager.validateCredentials(username, password)) {
+                return createErrorResponse(101, "Credenziali non valide");
+            }
 
-            System.out.println("[ClientHandler] Login successful per: " + username);
-            return createSuccessResponse("Login effettuato con successo");
+            // Login successful - registra nella mappa condivisa
+            socketUserMap.put(clientSocket, username);
+            System.out.println("[ClientHandler] Login successful: " + username);
+
+            return createSuccessResponse(100, "Login effettuato con successo");
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore durante login: " + e.getMessage());
@@ -235,26 +230,26 @@ public class ClientHandler implements Runnable {
 
     /**
      * Gestisce il logout del client
-     * Implementa disconnessione utente dal sistema rimuovendo
-     * l'associazione dalla mappa socket-utente
      *
-     * @param request oggetto JSON della richiesta (values vuoto per logout)
-     * @return JsonObject con codice risposta e messaggio
+     * @param request oggetto JSON della richiesta logout
+     * @return JsonObject con esito dell'operazione
      */
     private JsonObject handleLogout(JsonObject request) {
         try {
-            // Identifica utente tramite socket nella mappa condivisa
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
-                return createErrorResponse(101, "Utente non loggato");
+            String loggedUsername = socketUserMap.get(clientSocket);
+
+            if (loggedUsername == null) {
+                return createErrorResponse(101, "Nessun utente loggato su questa connessione");
             }
 
-            // Rimuove associazione socket-utente dalla mappa
+            // Rimuovi utente dalle notifiche multicast prima del logout
+            PriceNotificationService.unregisterUser(loggedUsername);
+
+            // Rimuovi dalla mappa degli utenti loggati
             socketUserMap.remove(clientSocket);
 
-            System.out.println("[ClientHandler] Logout per: " + username);
-
-            return createSuccessResponse("Logout effettuato per utente: " + username);
+            System.out.println("[ClientHandler] Logout successful: " + loggedUsername);
+            return createSuccessResponse(100, "Logout effettuato con successo");
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore durante logout: " + e.getMessage());
@@ -266,12 +261,12 @@ public class ClientHandler implements Runnable {
      * Gestisce l'aggiornamento delle credenziali utente
      *
      * @param request oggetto JSON con username, old_password, new_password
-     * @return JsonObject con codice risposta secondo specifiche ALLEGATO 1
+     * @return JsonObject con esito secondo ALLEGATO 1
      */
     private JsonObject handleUpdateCredentials(JsonObject request) {
         try {
             if (!request.has("values")) {
-                return createErrorResponse(105, "Messaggio updateCredentials non valido: manca campo values");
+                return createErrorResponse(103, "Messaggio non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
@@ -279,598 +274,474 @@ public class ClientHandler implements Runnable {
             String oldPassword = getStringValue(values, "old_password");
             String newPassword = getStringValue(values, "new_password");
 
-            // Validazione parametri base
-            if (username == null || oldPassword == null || newPassword == null ||
-                    username.trim().isEmpty() || oldPassword.trim().isEmpty() || newPassword.trim().isEmpty()) {
-                // Specifica meglio: se new_password è vuota = 101, altrimenti = 105
-                if (newPassword == null || newPassword.trim().isEmpty()) {
-                    return createErrorResponse(101, "Nuova password non valida");
-                }
-                return createErrorResponse(105, "Parametri non validi");
+            // Controllo se l'utente è attualmente loggato (non può cambiare password)
+            if (isUserAlreadyLoggedIn(username)) {
+                return createErrorResponse(104, "Impossibile aggiornare password: utente attualmente loggato");
             }
 
-            // Controlla che le password siano diverse (codice 103 secondo ALLEGATO 1)
+            // Validazione nuova password
+            if (!UserManager.isValidPassword(newPassword)) {
+                return createErrorResponse(101, "Nuova password non valida");
+            }
+
+            // Controllo che nuova password sia diversa dalla vecchia
             if (oldPassword.equals(newPassword)) {
-                return createErrorResponse(103, "La nuova password non può essere uguale alla precedente");
+                return createErrorResponse(103, "La nuova password deve essere diversa da quella attuale");
             }
 
-            // Verifica che utente NON sia attualmente loggato (codice 104 secondo ALLEGATO 1)
-            if (socketUserMap.containsValue(username)) {
-                return createErrorResponse(104, "Impossibile cambiare password: utente attualmente loggato");
+            // Aggiornamento tramite UserManager
+            boolean success = UserManager.updatePassword(username, oldPassword, newPassword);
+            if (success) {
+                System.out.println("[ClientHandler] Password aggiornata per utente: " + username);
+                return createSuccessResponse(100, "Password aggiornata con successo");
+            } else {
+                return createErrorResponse(102, "Username non esistente o password attuale errata");
             }
-
-            // Carica utenti e cerca l'utente specificato
-            JsonArray users = UserManager.loadUsers();
-            JsonObject user = UserManager.findUser(users, username);
-
-            // Username/password mismatch = codice 102 secondo ALLEGATO 1
-            if (user == null) {
-                return createErrorResponse(102, "Username non esistente");
-            }
-
-            // Verifica password attuale fornita
-            String storedPassword = user.get("password").getAsString();
-            if (!storedPassword.equals(oldPassword)) {
-                return createErrorResponse(102, "Password attuale non corretta");
-            }
-
-            // Aggiorna password nell'oggetto utente
-            user.addProperty("password", newPassword);
-
-            // Salva utenti aggiornati tramite UserManager
-            UserManager.saveUsers(users);
-
-            System.out.println("[ClientHandler] Password aggiornata per utente: " + username);
-            return createSuccessResponse("Password aggiornata con successo");
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante update credenziali: " + e.getMessage());
+            System.err.println("[ClientHandler] Errore aggiornamento credenziali: " + e.getMessage());
             return createErrorResponse(105, "Errore interno durante aggiornamento");
         }
     }
 
-    // =============== TRADING OPERATIONS ===============
+    // === OPERAZIONI TRADING ===
 
     /**
-     * Gestisce l'inserimento di un Limit Order
-     * Formato JSON ALLEGATO 1: type=bid/ask, size=NUMBER, price=NUMBER
-     * Risposta: { "orderId": NUMBER } o { "orderId": -1 } per errori
+     * Gestisce inserimento Limit Order
      *
-     * @param request oggetto JSON con type, size, price nel campo "values"
-     * @return JsonObject con orderId (o -1 se errore)
+     * @param request JSON con type, size, price secondo ALLEGATO 1
+     * @return JsonObject con orderId o errore
      */
     private JsonObject handleInsertLimitOrder(JsonObject request) {
         try {
-            // Controllo autenticazione utente
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
+            // Controllo autenticazione
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
                 return createOrderErrorResponse("Utente non loggato");
             }
 
+            // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Messaggio insertLimitOrder non valido: manca campo values");
+                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             String type = getStringValue(values, "type");
+            int size = getIntValue(values, "size");
+            int price = getIntValue(values, "price");
 
-            // Parsing size e price come interi (millesimi secondo specifiche)
-            Integer size = getIntegerValue(values, "size");
-            Integer price = getIntegerValue(values, "price");
+            // Chiamata a OrderManager per inserimento
+            int orderId = OrderManager.insertLimitOrder(loggedUsername, type, size, price);
 
-            // Validazione parametri
-            if (type == null || size == null || price == null ||
-                    (!type.equals("bid") && !type.equals("ask")) || size <= 0 || price <= 0) {
-                return createOrderErrorResponse("Parametri Limit Order non validi");
+            if (orderId == -1) {
+                return createOrderErrorResponse("Errore inserimento Limit Order");
             }
 
-            // Chiamata all'OrderManager per inserimento
-            int orderId = OrderManager.insertLimitOrder(username, type, size, price);
-
-            System.out.println("[ClientHandler] Limit Order " + orderId + " inserito per: " + username +
-                    " (" + type + " " + formatSize(size) + " BTC @ " + formatPrice(price) + " USD)");
-
-            return createOrderResponse(orderId);
+            // Risposta success con orderId
+            JsonObject response = new JsonObject();
+            response.addProperty("orderId", orderId);
+            return response;
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante insertLimitOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno durante inserimento ordine");
+            System.err.println("[ClientHandler] Errore insertLimitOrder: " + e.getMessage());
+            return createOrderErrorResponse("Errore interno server");
         }
     }
 
     /**
-     * Gestisce l'inserimento di un Market Order
-     * Formato JSON ALLEGATO 1: type=bid/ask, size=NUMBER
-     * Risposta: { "orderId": NUMBER } o { "orderId": -1 } per errori
+     * Gestisce inserimento Market Order
      *
-     * @param request oggetto JSON con type, size nel campo "values"
-     * @return JsonObject con orderId (o -1 se errore)
+     * @param request JSON con type, size secondo ALLEGATO 1
+     * @return JsonObject con orderId o errore
      */
     private JsonObject handleInsertMarketOrder(JsonObject request) {
         try {
-            // Controllo autenticazione utente
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
+            // Controllo autenticazione
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
                 return createOrderErrorResponse("Utente non loggato");
             }
 
+            // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Messaggio insertMarketOrder non valido: manca campo values");
+                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             String type = getStringValue(values, "type");
-            Integer size = getIntegerValue(values, "size");
+            int size = getIntValue(values, "size");
 
-            // Validazione parametri
-            if (type == null || size == null ||
-                    (!type.equals("bid") && !type.equals("ask")) || size <= 0) {
-                return createOrderErrorResponse("Parametri Market Order non validi");
+            // Chiamata a OrderManager per inserimento
+            int orderId = OrderManager.insertMarketOrder(loggedUsername, type, size);
+
+            if (orderId == -1) {
+                return createOrderErrorResponse("Errore inserimento Market Order");
             }
 
-            // Chiamata all'OrderManager per esecuzione immediata
-            int orderId = OrderManager.insertMarketOrder(username, type, size);
-
-            System.out.println("[ClientHandler] Market Order " + orderId + " eseguito per: " + username +
-                    " (" + type + " " + formatSize(size) + " BTC al prezzo di mercato)");
-
-            return createOrderResponse(orderId);
+            // Risposta success con orderId
+            JsonObject response = new JsonObject();
+            response.addProperty("orderId", orderId);
+            return response;
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante insertMarketOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno durante inserimento ordine");
+            System.err.println("[ClientHandler] Errore insertMarketOrder: " + e.getMessage());
+            return createOrderErrorResponse("Errore interno server");
         }
     }
 
     /**
-     * Gestisce l'inserimento di un Stop Order
-     * Formato JSON ALLEGATO 1: type=bid/ask, size=NUMBER, price=NUMBER (stopPrice)
-     * Risposta: { "orderId": NUMBER } o { "orderId": -1 } per errori
+     * Gestisce inserimento Stop Order
      *
-     * @param request oggetto JSON con type, size, price nel campo "values"
-     * @return JsonObject con orderId (o -1 se errore)
+     * @param request JSON con type, size, price (stopPrice) secondo ALLEGATO 1
+     * @return JsonObject con orderId o errore
      */
     private JsonObject handleInsertStopOrder(JsonObject request) {
         try {
-            // Controllo autenticazione utente
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
+            // Controllo autenticazione
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
                 return createOrderErrorResponse("Utente non loggato");
             }
 
+            // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Messaggio insertStopOrder non valido: manca campo values");
+                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             String type = getStringValue(values, "type");
-            Integer size = getIntegerValue(values, "size");
-            Integer stopPrice = getIntegerValue(values, "price"); // price field = stopPrice
+            int size = getIntValue(values, "size");
+            int stopPrice = getIntValue(values, "price"); // stopPrice secondo ALLEGATO 1
 
-            // Validazione parametri
-            if (type == null || size == null || stopPrice == null ||
-                    (!type.equals("bid") && !type.equals("ask")) || size <= 0 || stopPrice <= 0) {
-                return createOrderErrorResponse("Parametri Stop Order non validi");
+            // Chiamata a OrderManager per inserimento
+            int orderId = OrderManager.insertStopOrder(loggedUsername, type, size, stopPrice);
+
+            if (orderId == -1) {
+                return createOrderErrorResponse("Errore inserimento Stop Order");
             }
 
-            // Chiamata all'OrderManager per inserimento stop order
-            int orderId = OrderManager.insertStopOrder(username, type, size, stopPrice);
-
-            System.out.println("[ClientHandler] Stop Order " + orderId + " inserito per: " + username +
-                    " (" + type + " " + formatSize(size) + " BTC @ stop " + formatPrice(stopPrice) + " USD)");
-
-            return createOrderResponse(orderId);
+            // Risposta success con orderId
+            JsonObject response = new JsonObject();
+            response.addProperty("orderId", orderId);
+            return response;
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante insertStopOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno durante inserimento ordine");
+            System.err.println("[ClientHandler] Errore insertStopOrder: " + e.getMessage());
+            return createOrderErrorResponse("Errore interno server");
         }
     }
 
     /**
-     * Gestisce la cancellazione di un ordine
-     * Formato JSON ALLEGATO 1: orderId=NUMBER
-     * Risposta secondo ALLEGATO 1: { "response": 100/101, "errorMessage": STRING }
+     * Gestisce cancellazione ordine
      *
-     * @param request oggetto JSON con orderId nel campo "values"
-     * @return JsonObject con response code secondo ALLEGATO 1
+     * @param request JSON con orderId secondo ALLEGATO 1
+     * @return JsonObject con codici risposta 100/101
      */
     private JsonObject handleCancelOrder(JsonObject request) {
         try {
-            // Controllo autenticazione utente
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
+            // Controllo autenticazione
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
                 return createErrorResponse(101, "Utente non loggato");
             }
 
+            // Validazione formato richiesta
             if (!request.has("values")) {
-                return createErrorResponse(101, "Messaggio cancelOrder non valido: manca campo values");
+                return createErrorResponse(101, "Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            Integer orderId = getIntegerValue(values, "orderId");
+            int orderId = getIntValue(values, "orderId");
 
-            // Validazione parametri
-            if (orderId == null || orderId <= 0) {
-                return createErrorResponse(101, "OrderId non valido");
-            }
-
-            // Chiamata all'OrderManager per cancellazione
-            int result = OrderManager.cancelOrder(username, orderId);
+            // Chiamata a OrderManager per cancellazione
+            int result = OrderManager.cancelOrder(loggedUsername, orderId);
 
             if (result == 100) {
-                System.out.println("[ClientHandler] Ordine " + orderId + " cancellato con successo per: " + username);
-                return createSuccessResponse("Ordine cancellato con successo");
+                return createSuccessResponse(100, "Ordine cancellato con successo");
             } else {
-                System.out.println("[ClientHandler] Cancellazione ordine " + orderId + " fallita per: " + username);
-                return createErrorResponse(101, "Impossibile cancellare l'ordine");
+                return createErrorResponse(101, "Impossibile cancellare ordine");
             }
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante cancelOrder: " + e.getMessage());
-            return createErrorResponse(101, "Errore interno durante cancellazione ordine");
+            System.err.println("[ClientHandler] Errore cancelOrder: " + e.getMessage());
+            return createErrorResponse(101, "Errore interno server");
         }
     }
 
     /**
-     * Gestisce la richiesta getPriceHistory dal client
-     * Calcola dati OHLC (Open, High, Low, Close) per ogni giorno del mese richiesto
-     * Formato richiesta ALLEGATO 1: month=STRING(MMYYYY)
-     * Formato risposta definito dallo studente: array con dati giornalieri OHLC
+     * Gestisce richiesta storico prezzi mensile
      *
-     * @param request oggetto JSON con month nel campo "values"
-     * @return JsonObject con priceHistory array o messaggio errore
+     * @param request JSON con month (MMYYYY) secondo ALLEGATO 1
+     * @return JsonObject con dati storici (formato da definire)
      */
     private JsonObject handleGetPriceHistory(JsonObject request) {
         try {
-            // Controllo autenticazione utente
-            String username = socketUserMap.get(clientSocket);
-            if (username == null) {
-                return createPriceHistoryErrorResponse("Utente non loggato");
+            // Controllo autenticazione
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
+                // TODO: Verificare se questa operazione richiede autenticazione dalle specifiche
+                return createErrorResponse(101, "Utente non loggato");
             }
 
+            // Validazione formato richiesta
             if (!request.has("values")) {
-                return createPriceHistoryErrorResponse("Messaggio getPriceHistory non valido: manca campo values");
+                return createErrorResponse(101, "Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String month = getStringValue(values, "month");
+            String month = getStringValue(values, "month"); // Formato MMYYYY
 
-            // Validazione formato mese
-            if (month == null || !isValidMonthFormat(month)) {
-                return createPriceHistoryErrorResponse("Formato mese non valido. Usare MMYYYY (es: 012025)");
-            }
+            // TODO: Implementare logica per recupero dati storici dal file storicoOrdini.json
+            // Calcolare per ogni giorno: prezzo apertura, chiusura, massimo, minimo
 
-            System.out.println("[ClientHandler] Richiesta dati storici per mese " + month + " da utente: " + username);
+            System.out.println("[ClientHandler] Richiesta storico prezzi per: " + month);
 
-            // Calcolo dati OHLC per il mese richiesto
-            JsonArray priceHistory = calculateOHLC(month);
-
-            if (priceHistory.size() == 0) {
-                return createPriceHistoryErrorResponse("Nessun dato storico disponibile per il mese " + month);
-            }
-
-            // Creazione risposta con dati storici
+            // Risposta temporanea - da implementare
             JsonObject response = new JsonObject();
-            response.add("priceHistory", priceHistory);
+            response.addProperty("message", "Funzionalità getPriceHistory in sviluppo");
+            response.addProperty("month", month);
+            return response;
 
-            System.out.println("[ClientHandler] Inviati " + priceHistory.size() +
-                    " giorni di dati storici per mese " + month + " a: " + username);
+        } catch (Exception e) {
+            System.err.println("[ClientHandler] Errore getPriceHistory: " + e.getMessage());
+            return createErrorResponse(101, "Errore interno server");
+        }
+    }
+
+    // === NOTIFICHE PREZZO MULTICAST (VECCHIO ORDINAMENTO) ===
+
+    /**
+     * Gestisce la registrazione di un utente per notifiche di soglia prezzo
+     * Operazione specifica per studenti vecchio ordinamento
+     *
+     * Formato JSON richiesta:
+     * {
+     *   "operation": "registerPriceAlert",
+     *   "values": {
+     *     "thresholdPrice": NUMBER  // soglia in millesimi USD
+     *   }
+     * }
+     *
+     * @param request oggetto JSON contenente la soglia prezzo desiderata
+     * @return JsonObject con esito operazione
+     */
+    private JsonObject handleRegisterPriceAlert(JsonObject request) {
+        try {
+            // Controllo che utente sia loggato
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername == null) {
+                return createErrorResponse(101, "Utente non loggato - effettuare login prima di registrare notifiche");
+            }
+
+            // Validazione formato richiesta
+            if (!request.has("values")) {
+                return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
+            }
+
+            JsonObject values = request.getAsJsonObject("values");
+            if (!values.has("thresholdPrice")) {
+                return createErrorResponse(103, "Formato richiesta non valido: manca thresholdPrice");
+            }
+
+            // Estrazione e validazione soglia prezzo
+            int thresholdPrice;
+            try {
+                thresholdPrice = values.get("thresholdPrice").getAsInt();
+            } catch (Exception e) {
+                return createErrorResponse(103, "thresholdPrice deve essere un numero intero");
+            }
+
+            if (thresholdPrice <= 0) {
+                return createErrorResponse(103, "thresholdPrice deve essere maggiore di zero");
+            }
+
+            // Controllo logico: soglia deve essere maggiore del prezzo corrente
+            int currentPrice = OrderManager.getCurrentMarketPrice();
+            if (thresholdPrice <= currentPrice) {
+                return createErrorResponse(103, "thresholdPrice (" + formatPrice(thresholdPrice) +
+                        ") deve essere maggiore del prezzo corrente (" + formatPrice(currentPrice) + ")");
+            }
+
+            // Registrazione utente per notifiche multicast
+            PriceNotificationService.registerUserForPriceNotifications(loggedUsername, thresholdPrice);
+
+            // Risposta di successo con info multicast per il client
+            JsonObject response = new JsonObject();
+            response.addProperty("response", 100);
+            response.addProperty("message", "Registrazione notifiche prezzo completata");
+
+            // Aggiungi info multicast per il client
+            JsonObject multicastInfo = PriceNotificationService.getMulticastInfo();
+            response.add("multicastInfo", multicastInfo);
+
+            System.out.println("[ClientHandler] Utente " + loggedUsername +
+                    " registrato per notifiche prezzo > " + formatPrice(thresholdPrice) + " USD");
 
             return response;
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante getPriceHistory: " + e.getMessage());
-            return createPriceHistoryErrorResponse("Errore interno del server durante recupero dati storici");
+            System.err.println("[ClientHandler] Errore registrazione notifiche prezzo: " + e.getMessage());
+            return createErrorResponse(103, "Errore interno durante registrazione notifiche");
+        }
+    }
+
+    // === UTILITY METHODS ===
+
+    /**
+     * Controlla se un utente è già loggato (thread-safe)
+     *
+     * @param username nome utente da controllare
+     * @return true se utente già loggato
+     */
+    private boolean isUserAlreadyLoggedIn(String username) {
+        return socketUserMap.containsValue(username);
+    }
+
+    /**
+     * Ottiene informazioni sul client per logging
+     *
+     * @return stringa con info client (username@indirizzo)
+     */
+    private String getClientInfo() {
+        String username = socketUserMap.get(clientSocket);
+        if (username != null) {
+            return username + "@" + clientSocket.getRemoteSocketAddress();
+        } else {
+            return "anonymous@" + clientSocket.getRemoteSocketAddress();
         }
     }
 
     /**
-     * Calcola dati OHLC per il mese specificato dai trade eseguiti
-     * Legge i trade salvati e calcola per ogni giorno: apertura, massimo, minimo, chiusura
+     * Estrae valore stringa da JsonObject con gestione errori
      *
-     * @param month formato MMYYYY (es: "012025" per gennaio 2025)
-     * @return JsonArray con dati giornalieri OHLC
+     * @param json oggetto JSON
+     * @param key chiave da estrarre
+     * @return valore stringa o stringa vuota se errore
      */
-    private JsonArray calculateOHLC(String month) {
+    private String getStringValue(JsonObject json, String key) {
         try {
-            // Lettura trade eseguiti dal file JSON (implementazione futura)
-            // Per ora generiamo dati di esempio per test
-            return generateSampleOHLC(month);
-
-        /* TODO: Implementazione completa quando avremo il salvataggio trade
-        JsonArray executedTrades = OrderManager.getExecutedTradesForMonth(month);
-        return computeOHLCFromTrades(executedTrades, month);
-        */
-
+            return json.has(key) ? json.get(key).getAsString() : "";
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore calcolo OHLC per mese " + month + ": " + e.getMessage());
-            return new JsonArray();
+            return "";
         }
     }
 
     /**
-     * Genera dati OHLC di esempio per test (da sostituire con dati reali)
+     * Estrae valore intero da JsonObject con gestione errori
      *
-     * @param month formato MMYYYY
-     * @return JsonArray con dati di esempio
+     * @param json oggetto JSON
+     * @param key chiave da estrarre
+     * @return valore intero o 0 se errore
      */
-    private JsonArray generateSampleOHLC(String month) {
-        JsonArray priceHistory = new JsonArray();
-
+    private int getIntValue(JsonObject json, String key) {
         try {
-            int mm = Integer.parseInt(month.substring(0, 2));
-            int yyyy = Integer.parseInt(month.substring(2, 6));
-
-            // Calcolo giorni nel mese
-            int daysInMonth = getDaysInMonth(mm, yyyy);
-
-            // Prezzo base BTC (circa 58.000 USD in millesimi)
-            int basePrice = 58000000;
-
-            for (int day = 1; day <= daysInMonth; day++) {
-                JsonObject dayData = new JsonObject();
-
-                // Formato data DD/MM/YYYY
-                String date = String.format("%02d/%02d/%04d", day, mm, yyyy);
-
-                // Simulazione prezzi OHLC con variazioni casuali
-                int open = basePrice + (int)(Math.random() * 2000000 - 1000000);  // ±1000 USD
-                int high = open + (int)(Math.random() * 1500000);                 // +0-1500 USD
-                int low = open - (int)(Math.random() * 1500000);                  // -0-1500 USD
-                int close = low + (int)(Math.random() * (high - low));           // tra low e high
-
-                dayData.addProperty("date", date);
-                dayData.addProperty("open", open);
-                dayData.addProperty("high", high);
-                dayData.addProperty("low", low);
-                dayData.addProperty("close", close);
-
-                priceHistory.add(dayData);
-            }
-
+            return json.has(key) ? json.get(key).getAsInt() : 0;
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore generazione dati esempio: " + e.getMessage());
-        }
-
-        return priceHistory;
-    }
-
-    /**
-     * Calcola il numero di giorni nel mese specificato
-     *
-     * @param month mese (1-12)
-     * @param year anno
-     * @return numero di giorni nel mese
-     */
-    private int getDaysInMonth(int month, int year) {
-        int[] daysInMonth = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-
-        // Gestione anno bisestile
-        if (month == 2 && isLeapYear(year)) {
-            return 29;
-        }
-
-        return daysInMonth[month];
-    }
-
-    /**
-     * Verifica se un anno è bisestile
-     *
-     * @param year anno da verificare
-     * @return true se bisestile, false altrimenti
-     */
-    private boolean isLeapYear(int year) {
-        return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-    }
-
-    /**
-     * Valida il formato del mese MMYYYY
-     *
-     * @param month stringa da validare
-     * @return true se formato corretto, false altrimenti
-     */
-    private boolean isValidMonthFormat(String month) {
-        if (month == null || month.length() != 6) {
-            return false;
-        }
-
-        try {
-            int mm = Integer.parseInt(month.substring(0, 2));
-            int yyyy = Integer.parseInt(month.substring(2, 6));
-
-            return mm >= 1 && mm <= 12 && yyyy >= 2020 && yyyy <= 2030;
-        } catch (NumberFormatException e) {
-            return false;
+            return 0;
         }
     }
 
     /**
-     * Crea risposta di errore per getPriceHistory
+     * Formatta prezzo in millesimi per display user-friendly
      *
-     * @param errorMessage messaggio di errore
-     * @return JsonObject con campo error
+     * @param priceInMillis prezzo in millesimi USD
+     * @return prezzo formattato (es: "58.000")
      */
-    private JsonObject createPriceHistoryErrorResponse(String errorMessage) {
+    private String formatPrice(int priceInMillis) {
+        return String.format("%,.0f", priceInMillis / 1000.0);
+    }
+
+    // === RESPONSE HELPERS ===
+
+    /**
+     * Crea risposta di successo standardizzata
+     *
+     * @param code codice di risposta
+     * @param message messaggio descrittivo
+     * @return JsonObject strutturato secondo ALLEGATO 1
+     */
+    private JsonObject createSuccessResponse(int code, String message) {
         JsonObject response = new JsonObject();
-        response.addProperty("error", errorMessage);
-        return response;
-    }
-
-    // =============== UTILITY METHODS ===============
-
-    /**
-     * Invia una risposta JSON al client
-     * Serializza l'oggetto JsonObject in stringa JSON e lo invia
-     * tramite il PrintWriter con autoflush abilitato
-     *
-     * @param response oggetto JsonObject contenente la risposta da serializzare e inviare
-     */
-    private void sendResponse(JsonObject response) {
-        String responseJson = gson.toJson(response);
-        out.println(responseJson);
-    }
-
-    /**
-     * Invia una risposta di errore al client
-     * Metodo di utilità per creare e inviare rapidamente risposte di errore
-     * Combina creazione dell'oggetto errore e invio in una singola chiamata
-     *
-     * @param errorCode codice numerico dell'errore
-     * @param errorMessage messaggio descrittivo dell'errore per debugging
-     */
-    private void sendErrorResponse(int errorCode, String errorMessage) {
-        JsonObject response = createErrorResponse(errorCode, errorMessage);
-        sendResponse(response);
-    }
-
-    /**
-     * Crea una risposta di successo standard
-     * Genera oggetto JSON
-     *
-     * @param message messaggio descrittivo del successo dell'operazione
-     * @return JsonObject formattato
-     */
-    private JsonObject createSuccessResponse(String message) {
-        JsonObject response = new JsonObject();
-        response.addProperty("response", 100);
+        response.addProperty("response", code);
         response.addProperty("errorMessage", message);
         return response;
     }
 
     /**
-     * Crea una risposta di errore standard
-     * Genera oggetto JSON conforme
+     * Crea risposta di errore standardizzata
      *
-     * @param errorCode codice numerico dell'errore (101, 102, 103, etc.)
-     * @param errorMessage messaggio descrittivo dell'errore
-     * @return JsonObject formattato
+     * @param code codice di errore
+     * @param message messaggio di errore
+     * @return JsonObject strutturato secondo ALLEGATO 1
      */
-    private JsonObject createErrorResponse(int errorCode, String errorMessage) {
+    private JsonObject createErrorResponse(int code, String message) {
         JsonObject response = new JsonObject();
-        response.addProperty("response", errorCode);
-        response.addProperty("errorMessage", errorMessage);
+        response.addProperty("response", code);
+        response.addProperty("errorMessage", message);
         return response;
     }
 
     /**
-     * Crea una risposta per operazioni ordine secondo formato ALLEGATO 1
-     * Formato: { "orderId": NUMBER }
+     * Crea risposta di errore per operazioni ordini
      *
-     * @param orderId ID dell'ordine (o -1 per errore)
-     * @return JsonObject formattato secondo specifiche
-     */
-    private JsonObject createOrderResponse(int orderId) {
-        JsonObject response = new JsonObject();
-        response.addProperty("orderId", orderId);
-        return response;
-    }
-
-    /**
-     * Crea una risposta di errore per operazioni ordine
-     * Ritorna orderId = -1 secondo specifiche ALLEGATO 1
-     *
-     * @param errorMessage messaggio descrittivo dell'errore
-     * @return JsonObject con orderId = -1
+     * @param errorMessage messaggio di errore
+     * @return JsonObject con orderId = -1 secondo ALLEGATO 1
      */
     private JsonObject createOrderErrorResponse(String errorMessage) {
-        System.err.println("[ClientHandler] Errore ordine: " + errorMessage);
-        return createOrderResponse(-1);
+        JsonObject response = new JsonObject();
+        response.addProperty("orderId", -1);
+        return response;
     }
 
     /**
-     * Estrae un valore stringa da un JsonObject in modo sicuro
+     * Invia risposta JSON al client
      *
-     * @param obj oggetto JsonObject da cui estrarre il valore
-     * @param key chiave da cercare nell'oggetto JSON
-     * @return valore stringa se presente e non null, altrimenti null
+     * @param response oggetto JSON da inviare
      */
-    private String getStringValue(JsonObject obj, String key) {
-        if (obj.has(key) && !obj.get(key).isJsonNull()) {
-            return obj.get(key).getAsString();
-        }
-        return null;
+    private void sendResponse(JsonObject response) {
+        out.println(response.toString());
     }
 
     /**
-     * Estrae un valore intero da un JsonObject in modo sicuro
-     * Necessario per parsing size e price come interi (millesimi)
+     * Invia risposta di errore rapida
      *
-     * @param obj oggetto JsonObject da cui estrarre il valore
-     * @param key chiave da cercare nell'oggetto JSON
-     * @return valore intero se presente e valido, altrimenti null
+     * @param code codice di errore
+     * @param message messaggio di errore
      */
-    private Integer getIntegerValue(JsonObject obj, String key) {
-        if (obj.has(key) && !obj.get(key).isJsonNull()) {
-            try {
-                return obj.get(key).getAsInt();
-            } catch (NumberFormatException | ClassCastException e) {
-                System.err.println("[ClientHandler] Errore parsing intero per chiave " + key + ": " + e.getMessage());
-                return null;
-            }
-        }
-        return null;
+    private void sendErrorResponse(int code, String message) {
+        sendResponse(createErrorResponse(code, message));
     }
 
     /**
-     * Ottiene informazioni sul client per logging e debugging
-     * Restituisce username se client è loggato, altrimenti "anonimo"
-     * Utilizzato nei log per identificare il client nelle operazioni
-     *
-     * @return stringa identificativa del client per i messaggi di log
-     */
-    private String getClientInfo() {
-        String username = socketUserMap.get(clientSocket);
-        return username != null ? username : "anonimo";
-    }
-
-    /**
-     * Formatta size in millesimi per logging (es: 1000 -> "1.000 BTC")
-     */
-    private String formatSize(int sizeInMilliths) {
-        return String.format("%.3f", sizeInMilliths / 1000.0);
-    }
-
-    /**
-     * Formatta price in millesimi per logging (es: 58000000 -> "58000.000 USD")
-     */
-    private String formatPrice(int priceInMilliths) {
-        return String.format("%.3f", priceInMilliths / 1000.0);
-    }
-
-    /**
-     * Cleanup delle risorse quando il client si disconnette
-     * Garantisce rilascio ordinato di tutte le risorse associate al client
+     * Cleanup delle risorse del client
+     * Rimuove utente dalla mappa degli utenti loggati e dalle notifiche multicast
+     * Chiude stream e socket
      */
     private void cleanup() {
-        // Logout automatico se client era loggato
-        String username = socketUserMap.remove(clientSocket);
-        if (username != null) {
-            System.out.println("[ClientHandler] Logout automatico per: " + username +
-                    " (disconnessione client)");
-        }
-
-        // Chiusura stream di comunicazione
         try {
-            if (in != null) {
-                in.close();
+            // Rimuovi utente dalle notifiche multicast se era loggato
+            String loggedUsername = socketUserMap.get(clientSocket);
+            if (loggedUsername != null) {
+                PriceNotificationService.unregisterUser(loggedUsername);
+                System.out.println("[ClientHandler] Cleanup: rimosso " + loggedUsername + " dalle notifiche multicast");
             }
-            if (out != null) {
-                out.close();
-            }
-        } catch (IOException e) {
-            System.err.println("[ClientHandler] Errore chiusura stream: " + e.getMessage());
-        }
 
-        // Chiusura socket TCP
-        try {
+            // Rimuovi dalla mappa degli utenti loggati
+            socketUserMap.remove(clientSocket);
+
+            // Chiudi stream
+            if (in != null) in.close();
+            if (out != null) out.close();
+
+            // Chiudi socket se non già chiuso
             if (clientSocket != null && !clientSocket.isClosed()) {
                 clientSocket.close();
-                System.out.println("[ClientHandler] Socket client chiuso: " +
-                        clientSocket.getRemoteSocketAddress());
             }
+
+            System.out.println("[ClientHandler] Client disconnesso: " + getClientInfo());
+
         } catch (IOException e) {
-            System.err.println("[ClientHandler] Errore chiusura socket: " + e.getMessage());
+            System.err.println("[ClientHandler] Errore durante cleanup: " + e.getMessage());
         }
     }
 }

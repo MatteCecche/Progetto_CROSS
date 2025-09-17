@@ -14,8 +14,8 @@ import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import com.google.gson.JsonArray;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import server.RegistrazioneRMI;
@@ -26,6 +26,7 @@ import server.RegistrazioneRMI;
  * - Interfaccia utente con parsing comandi e validazione input
  * - Gestione connessioni RMI per registrazione nuovi utenti
  * - Gestione connessioni TCP per login e operazioni post-autenticazione
+ * - Listener multicast per notifiche prezzo (vecchio ordinamento)
  * - Serializzazione/deserializzazione messaggi JSON
  * - Interpretazione codici di risposta del server
  */
@@ -46,6 +47,21 @@ public class ClientMain {
 
     // Scanner per input utente da console con gestione delle righe
     private static Scanner userScanner;
+
+    // === VARIABILI PER GESTIONE MULTICAST (VECCHIO ORDINAMENTO) ===
+
+    // Listener multicast per notifiche prezzo
+    private static MulticastListener multicastListener;
+
+    // Thread per listener multicast
+    private static Thread multicastThread;
+
+    // Username dell'utente attualmente loggato
+    private static String currentLoggedUsername;
+
+    // Parametri multicast letti da properties
+    private static String multicastAddress;
+    private static int multicastPort;
 
     /**
      * Main del client CROSS
@@ -78,10 +94,15 @@ public class ClientMain {
         int socketTimeout;
 
         try {
-            serverHost = parseRequiredStringProperty(config);
+            serverHost = parseRequiredStringProperty(config, "server.host");
             tcpPort = parseRequiredIntProperty(config, "TCP.port");
             rmiPort = parseRequiredIntProperty(config, "RMI.port");
             socketTimeout = parseRequiredIntProperty(config, "socket.timeout");
+
+            // Lettura parametri multicast da properties (vecchio ordinamento)
+            multicastAddress = parseRequiredStringProperty(config, "multicast.address");
+            multicastPort = parseRequiredIntProperty(config, "multicast.port");
+
         } catch (IllegalArgumentException e) {
             System.err.println("[Client] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
@@ -96,7 +117,7 @@ public class ClientMain {
             // Inizializza scanner per input utente dalla console
             userScanner = new Scanner(System.in);
 
-            // Avvia loop principale dell'interfaccia utente
+            // Avvia loop principale dell'interfaccia utente con parametri multicast
             startUserInterface(serverHost, tcpPort, rmiPort, socketTimeout);
 
         } catch (Exception e) {
@@ -156,14 +177,15 @@ public class ClientMain {
      * Effettua il parsing di una stringa da Properties
      *
      * @param props oggetto Properties contenente la configurazione
+     * @param key chiave della property da leggere
      * @return valore dell'hostname del server con trim applicato
      * @throws IllegalArgumentException se la property manca o è vuota
      */
-    private static String parseRequiredStringProperty(Properties props) {
-        String value = props.getProperty("server.host");
+    private static String parseRequiredStringProperty(Properties props, String key) {
+        String value = props.getProperty(key);
 
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException("Parametro mancante nel file client.properties: " + "server.host");
+            throw new IllegalArgumentException("Parametro mancante nel file client.properties: " + key);
         }
 
         return value.trim();
@@ -182,6 +204,7 @@ public class ClientMain {
 
         System.out.println("\n[Client] === CROSS: an exChange oRder bOokS Service ===");
         System.out.println("[Client] Digitare 'help' per lista comandi disponibili");
+        System.out.println("[Client] Configurazione multicast: " + multicastAddress + ":" + multicastPort);
 
         while (running) {
             System.out.print(">> ");
@@ -218,6 +241,7 @@ public class ClientMain {
                         handleUpdateCredentials(parts, serverHost, tcpPort, socketTimeout);
                         break;
 
+                    // === COMANDI TRADING ===
                     case "insertlimitorder":
                         handleInsertLimitOrder(parts);
                         break;
@@ -235,6 +259,11 @@ public class ClientMain {
                         break;
                     case "getpricehistory":
                         handleGetPriceHistory(parts);
+                        break;
+
+                    // === NOTIFICHE PREZZO (VECCHIO ORDINAMENTO) ===
+                    case "registerpricealert":
+                        handleRegisterPriceAlert(parts);
                         break;
 
                     case "esci":
@@ -271,6 +300,12 @@ public class ClientMain {
         System.out.println("insertStopOrder <bid/ask> <size> <stopPrice>       - Inserisce stop order");
         System.out.println("cancelOrder <orderId>                              - Cancella ordine");
         System.out.println("marketPrice                                        - Mostra prezzo corrente BTC");
+        System.out.println("getPriceHistory <MMYYYY>                           - Ottieni storico prezzi mensile");
+        System.out.println();
+        System.out.println("=== NOTIFICHE PREZZO (vecchio ordinamento) ===");
+        System.out.println("registerPriceAlert <soglia>                        - Registra notifica soglia prezzo");
+        System.out.println("                                                     Esempio: registerPriceAlert 65000000");
+        System.out.println("                                                     (per ricevere notifica quando BTC > 65.000 USD)");
         System.out.println();
         System.out.println("NOTA: size e price in millesimi (es: 1000 = 1 BTC, 58000000 = 58.000 USD)");
         System.out.println("esci                                               - Termina il client");
@@ -311,769 +346,420 @@ public class ClientMain {
             // Interpretazione codici di risposta
             switch (responseCode) {
                 case 100:
-                    System.out.println("[Client] Registrazione completata con successo");
+                    System.out.println("[Client] Registrazione completata con successo!");
                     break;
                 case 101:
-                    System.out.println("[Client] Errore: password non valida");
+                    System.out.println("[Client] Errore: password non valida (troppo corta o vuota)");
                     break;
                 case 102:
-                    System.out.println("[Client] Errore: username già esistente");
+                    System.out.println("[Client] Errore: username già in uso, scegliere un altro nome utente");
                     break;
                 case 103:
-                    System.out.println("[Client] Errore durante registrazione");
+                    System.out.println("[Client] Errore interno del server durante registrazione");
                     break;
                 default:
-                    System.out.println("[Client] Codice di risposta non riconosciuto: " + responseCode);
+                    System.out.println("[Client] Errore registrazione sconosciuto (codice " + responseCode + ")");
                     break;
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore durante registrazione: " + e.getMessage());
+            System.err.println("[Client] Errore durante registrazione RMI: " + e.getMessage());
+            System.err.println("[Client] Verificare che il server sia avviato e raggiungibile");
         }
     }
 
     /**
-     * Gestisce il login utente con connessione TCP persistente
-     * Implementa autenticazione e mantenimento sessione secondo ALLEGATO 1
+     * Gestisce il login dell'utente e avvia listener multicast per notifiche prezzo
+     * Estende funzionalità esistente con supporto multicast (vecchio ordinamento)
      *
      * @param parts comando parsato dall'input utente
      * @param serverHost indirizzo del server per connessione TCP
-     * @param tcpPort porta TCP del server per connessioni client
-     * @param socketTimeout timeout per socket TCP in millisecondi
+     * @param tcpPort porta TCP del server
+     * @param socketTimeout timeout per la connessione
      */
     private static void handleLogin(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
         try {
-            // Validazione numero parametri
+            // Validazione parametri
             if (parts.length != 3) {
                 System.out.println("[Client] Uso: login <username> <password>");
-                return;
-            }
-
-            // Controllo stato connessione esistente
-            if (tcpSocket != null && tcpSocket.isConnected()) {
-                System.out.println("[Client] Già connesso al server. Effettuare logout prima.");
                 return;
             }
 
             String username = parts[1];
             String password = parts[2];
 
-            // Validazione contenuto parametri
             if (username.trim().isEmpty() || password.trim().isEmpty()) {
-                System.out.println("[Client] Username e password non possono essere vuoti o contenere solo spazi");
+                System.out.println("[Client] Username e password non possono essere vuoti");
                 return;
             }
 
-            // Stabilisce connessione TCP con timeout configurato
+            // Controlla se già loggato
+            if (tcpSocket != null && !tcpSocket.isClosed()) {
+                System.out.println("[Client] Utente già loggato. Effettuare logout prima di un nuovo login.");
+                return;
+            }
+
+            // Stabilisce connessione TCP con il server
             tcpSocket = new Socket(serverHost, tcpPort);
             tcpSocket.setSoTimeout(socketTimeout);
 
-            // Inizializza stream per comunicazione JSON bidirezionale
             in = new BufferedReader(new InputStreamReader(tcpSocket.getInputStream()));
             out = new PrintWriter(tcpSocket.getOutputStream(), true);
 
-            System.out.println("[Client] Connessione TCP stabilita con " +
-                    tcpSocket.getRemoteSocketAddress());
-
-            // Costruzione richiesta di login JSON
-            JsonObject loginRequest = new JsonObject();
-            loginRequest.addProperty("operation", "login");
+            // Creazione richiesta JSON di login
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "login");
 
             JsonObject values = new JsonObject();
             values.addProperty("username", username);
             values.addProperty("password", password);
-            loginRequest.add("values", values);
+            request.add("values", values);
 
-            // Invio richiesta al server
-            out.println(loginRequest.toString());
+            // Invio richiesta
+            out.println(request.toString());
 
-            // Ricezione e parsing risposta JSON del server
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+            // Lettura risposta
+            String responseStr = in.readLine();
+            if (responseStr == null) {
+                System.out.println("[Client] Errore: connessione al server persa durante login");
+                return;
+            }
 
+            // Parsing risposta JSON
+            JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
             int responseCode = response.get("response").getAsInt();
             String errorMessage = response.get("errorMessage").getAsString();
 
-            // Gestione risposta server
-            if (responseCode == 100) {
-                System.out.println("[Client] Login effettuato con successo");
-                // Connessione rimane aperta per la sessione
-            } else {
-                System.out.println("[Client] Login fallito (codice " + responseCode + "): " + errorMessage);
-                // Chiude connessione in caso di login fallito
-                tcpSocket.close();
-                tcpSocket = null;
+            // Gestione risultato login
+            boolean loginSuccessful = false;
+            switch (responseCode) {
+                case 100:
+                    System.out.println("[Client] Login effettuato con successo!");
+                    System.out.println("[Client] Connesso come: " + username);
+                    currentLoggedUsername = username;
+                    loginSuccessful = true;
+                    break;
+                case 101:
+                    System.out.println("[Client] Errore login: credenziali non valide");
+                    break;
+                case 102:
+                    System.out.println("[Client] Errore login: utente già connesso");
+                    break;
+                case 103:
+                    System.out.println("[Client] Errore interno del server durante login");
+                    break;
+                default:
+                    System.out.println("[Client] Errore login (codice " + responseCode + "): " + errorMessage);
+                    break;
             }
+
+            // Se login fallito, chiudi connessione
+            if (!loginSuccessful) {
+                try {
+                    if (out != null) out.close();
+                    if (in != null) in.close();
+                    if (tcpSocket != null) tcpSocket.close();
+                    tcpSocket = null;
+                    in = null;
+                    out = null;
+                } catch (IOException e) {
+                    System.err.println("[Client] Errore chiusura connessione dopo login fallito: " + e.getMessage());
+                }
+                return;
+            }
+
+            // Avvia listener multicast dopo login successful
+            startMulticastListener();
 
         } catch (Exception e) {
             System.err.println("[Client] Errore durante login: " + e.getMessage());
-            // Cleanup connessione in caso di errore
-            if (tcpSocket != null) {
-                try {
-                    tcpSocket.close();
-                } catch (IOException ex) {
-                    // Ignora errori durante cleanup
-                }
-                tcpSocket = null;
-            }
         }
     }
 
     /**
-     * Gestisce il logout e chiude la connessione TCP
+     * Gestisce il logout dell'utente e ferma listener multicast
      */
     private static void handleLogout() {
         try {
-            // Controllo stato connessione
-            if (tcpSocket == null || !tcpSocket.isConnected()) {
-                System.out.println("[Client] Non connesso al server");
+            // Controlla se effettivamente loggato
+            if (tcpSocket == null || tcpSocket.isClosed()) {
+                System.out.println("[Client] Nessun utente attualmente loggato");
                 return;
             }
 
-            // Costruzione e invio richiesta di logout JSON
-            JsonObject logoutRequest = new JsonObject();
-            logoutRequest.addProperty("operation", "logout");
-            logoutRequest.add("values", new JsonObject()); // values vuoto per logout
+            // Ferma listener multicast prima del logout
+            stopMulticastListener();
 
-            out.println(logoutRequest.toString());
+            // Creazione richiesta JSON di logout
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "logout");
+            request.add("values", new JsonObject());
 
-            // Ricezione e parsing risposta del server
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+            // Invio richiesta
+            out.println(request.toString());
 
-            int responseCode = response.get("response").getAsInt();
-            String errorMessage = response.get("errorMessage").getAsString();
+            // Lettura risposta
+            String responseStr = in.readLine();
+            if (responseStr != null) {
+                JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
+                int responseCode = response.get("response").getAsInt();
 
-            // Feedback risposta server
-            if (responseCode == 100) {
-                System.out.println("[Client] Logout effettuato con successo");
-            } else {
-                System.out.println("[Client] Logout fallito (codice " + responseCode + "): " + errorMessage);
+                switch (responseCode) {
+                    case 100:
+                        System.out.println("[Client] Logout effettuato con successo");
+                        break;
+                    default:
+                        System.out.println("[Client] Logout completato (codice " + responseCode + ")");
+                        break;
+                }
             }
 
-            // Chiude connessione e resetta stato indipendentemente dalla risposta
-            tcpSocket.close();
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante logout: " + e.getMessage());
+        } finally {
+            // Cleanup connessione TCP
+            try {
+                if (out != null) out.close();
+                if (in != null) in.close();
+                if (tcpSocket != null) tcpSocket.close();
+            } catch (IOException e) {
+                System.err.println("[Client] Errore chiusura connessione: " + e.getMessage());
+            }
+
             tcpSocket = null;
             in = null;
             out = null;
+            currentLoggedUsername = null;
 
-        } catch (IOException e) {
-            System.err.println("[Client] Errore durante logout: " + e.getMessage());
+            System.out.println("[Client] Disconnesso dal server");
         }
     }
 
     /**
-     * Gestisce l'aggiornamento delle credenziali utente con connessione temporanea
-     * Crea una connessione TCP dedicata solo per questa operazione
+     * Gestisce comando per registrare notifiche soglia prezzo
+     * Sintassi: registerPriceAlert <soglia_prezzo>
      *
-     * @param parts comando parsato dall'input utente con parametri
-     * @param serverHost indirizzo del server per connessione TCP
-     * @param tcpPort porta TCP del server per connessioni client
-     * @param socketTimeout timeout per socket TCP in millisecondi
+     * @param parts comando parsato dall'input utente
      */
-    private static void handleUpdateCredentials(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
-        // Validazione numero parametri
-        if (parts.length != 4) {
-            System.out.println("[Client] Uso: updateCredentials <username> <old_password> <new_password>");
-            return;
-        }
-
-        String username = parts[1];
-        String oldPassword = parts[2];
-        String newPassword = parts[3];
-
-        // Validazione contenuto parametri
-        if (username.trim().isEmpty() || oldPassword.trim().isEmpty() || newPassword.trim().isEmpty()) {
-            System.out.println("[Client] Tutti i parametri sono obbligatori e non possono contenere solo spazi");
-            return;
-        }
-
-        // Variabili per connessione temporanea
-        Socket tempSocket = null;
-        BufferedReader tempIn = null;
-        PrintWriter tempOut = null;
-
+    private static void handleRegisterPriceAlert(String[] parts) {
         try {
-            System.out.println("[Client] Stabilendo connessione temporanea per updateCredentials...");
+            // Controllo login
+            if (tcpSocket == null || tcpSocket.isClosed() || currentLoggedUsername == null) {
+                System.out.println("[Client] Errore: effettuare login prima di registrare notifiche prezzo");
+                return;
+            }
 
-            // Crea connessione TCP temporanea dedicata
-            tempSocket = new Socket(serverHost, tcpPort);
-            tempSocket.setSoTimeout(socketTimeout);
+            // Validazione parametri
+            if (parts.length != 2) {
+                System.out.println("[Client] Uso: registerPriceAlert <soglia_prezzo>");
+                System.out.println("[Client] Esempio: registerPriceAlert 65000000  (per 65.000 USD)");
+                return;
+            }
 
-            // Inizializza stream per comunicazione JSON
-            tempIn = new BufferedReader(new InputStreamReader(tempSocket.getInputStream()));
-            tempOut = new PrintWriter(tempSocket.getOutputStream(), true);
+            // Parsing soglia prezzo
+            int thresholdPrice;
+            try {
+                thresholdPrice = Integer.parseInt(parts[1]);
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] Errore: soglia_prezzo deve essere un numero intero in millesimi");
+                System.out.println("[Client] Esempio: 65000000 per 65.000 USD");
+                return;
+            }
 
-            System.out.println("[Client] Connessione temporanea stabilita con " +
-                    tempSocket.getRemoteSocketAddress());
+            if (thresholdPrice <= 0) {
+                System.out.println("[Client] Errore: soglia_prezzo deve essere maggiore di zero");
+                return;
+            }
 
-            // Costruzione richiesta JSON
+            // Creazione richiesta JSON
             JsonObject request = new JsonObject();
-            request.addProperty("operation", "updateCredentials");
+            request.addProperty("operation", "registerPriceAlert");
 
             JsonObject values = new JsonObject();
-            values.addProperty("username", username);
-            values.addProperty("old_password", oldPassword);
-            values.addProperty("new_password", newPassword);
+            values.addProperty("thresholdPrice", thresholdPrice);
             request.add("values", values);
 
             // Invio richiesta al server
-            tempOut.println(request.toString());
+            out.println(request.toString());
+            String responseStr = in.readLine();
 
-            // Ricezione e parsing risposta del server
-            String responseJson = tempIn.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
+            if (responseStr == null) {
+                System.out.println("[Client] Errore: connessione al server persa");
+                return;
+            }
 
+            // Parsing risposta
+            JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
             int responseCode = response.get("response").getAsInt();
-            String errorMessage = response.get("errorMessage").getAsString();
 
-            // Feedback risultato operazione con interpretazione codici
+            // Gestione risultato
             switch (responseCode) {
                 case 100:
-                    System.out.println("[Client] Password aggiornata con successo");
+                    System.out.println("[Client] ✅ Notifiche prezzo registrate con successo!");
+                    System.out.println("[Client] Soglia: " + formatPrice(thresholdPrice) + " USD");
+                    System.out.println("[Client] Riceverai notifiche multicast quando il prezzo BTC supererà questa soglia");
+
+                    // Mostra info multicast se presente
+                    if (response.has("multicastInfo")) {
+                        JsonObject multicastInfo = response.getAsJsonObject("multicastInfo");
+                        System.out.println("[Client] Multicast attivo: " +
+                                multicastInfo.get("multicastAddress").getAsString() + ":" +
+                                multicastInfo.get("multicastPort").getAsInt());
+                    }
                     break;
-                case 102:
-                    System.out.println("[Client] Errore: username non esistente o password attuale errata");
-                    break;
-                case 103:
-                    System.out.println("[Client] Errore: parametri non validi o nuova password uguale alla precedente");
-                    break;
-                case 104:
-                    System.out.println("[Client] Errore: impossibile cambiare password, utente attualmente loggato");
-                    break;
-                case 105:
-                    System.out.println("[Client] Errore interno del server durante aggiornamento");
-                    break;
-                default:
-                    System.out.println("[Client] Errore aggiornamento password (codice " + responseCode + "): " + errorMessage);
-                    break;
-            }
 
-        } catch (Exception e) {
-            System.err.println("[Client] Errore durante updateCredentials: " + e.getMessage());
-        } finally {
-            // Cleanup garantito della connessione temporanea
-            try {
-                if (tempOut != null) {
-                    tempOut.close();
-                }
-                if (tempIn != null) {
-                    tempIn.close();
-                }
-                if (tempSocket != null && !tempSocket.isClosed()) {
-                    tempSocket.close();
-                    System.out.println("[Client] Connessione temporanea chiusa");
-                }
-            } catch (IOException e) {
-                // Ignora errori durante cleanup - connessione temporanea
-                System.err.println("[Client] Avviso: errore durante chiusura connessione temporanea: " + e.getMessage());
-            }
-        }
-    }
-
-    /**
-     * Gestisce il comando insertLimitOrder dal client
-     * Sintassi: insertLimitOrder <bid/ask> <size> <price>
-     *
-     * @param parts comando parsato dall'input utente
-     */
-    private static void handleInsertLimitOrder(String[] parts) {
-        try {
-            // Validazione numero parametri
-            if (parts.length != 4) {
-                System.out.println("[Client] Uso: insertLimitOrder <bid/ask> <size> <price>");
-                System.out.println("[Client] Esempio: insertLimitOrder bid 1000 58000000  (compra 1 BTC a 58.000 USD)");
-                return;
-            }
-
-            // Controllo connessione attiva
-            if (!isConnected()) {
-                return;
-            }
-
-            String type = parts[1].toLowerCase();
-            String sizeStr = parts[2];
-            String priceStr = parts[3];
-
-            // Validazione type
-            if (!type.equals("bid") && !type.equals("ask")) {
-                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
-                return;
-            }
-
-            // Parsing numeri
-            int size, price;
-            try {
-                size = Integer.parseInt(sizeStr);
-                price = Integer.parseInt(priceStr);
-            } catch (NumberFormatException e) {
-                System.out.println("[Client] Size e price devono essere numeri interi (millesimi)");
-                return;
-            }
-
-            // Validazione valori
-            if (size <= 0 || price <= 0) {
-                System.out.println("[Client] Size e price devono essere maggiori di zero");
-                return;
-            }
-
-            // Costruzione richiesta JSON secondo ALLEGATO 1
-            JsonObject request = new JsonObject();
-            request.addProperty("operation", "insertLimitOrder");
-
-            JsonObject values = new JsonObject();
-            values.addProperty("type", type);
-            values.addProperty("size", size);
-            values.addProperty("price", price);
-            request.add("values", values);
-
-            // Invio richiesta e ricezione risposta
-            out.println(request.toString());
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
-
-            // Parsing risposta secondo formato ALLEGATO 1
-            int orderId = response.get("orderId").getAsInt();
-
-            if (orderId != -1) {
-                System.out.println("[Client] Limit Order inserito con successo - ID: " + orderId);
-                System.out.println("[Client] " + (type.equals("bid") ? "Acquisto" : "Vendita") + " di " +
-                        formatSize(size) + " BTC a " + formatPrice(price) + " USD");
-            } else {
-                System.out.println("[Client] Errore inserimento Limit Order - verificare parametri e liquidità");
-            }
-
-        } catch (Exception e) {
-            System.err.println("[Client] Errore durante insertLimitOrder: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Gestisce il comando insertMarketOrder dal client
-     * Sintassi: insertMarketOrder <bid/ask> <size>
-     *
-     * @param parts comando parsato dall'input utente
-     */
-    private static void handleInsertMarketOrder(String[] parts) {
-        try {
-            // Validazione numero parametri
-            if (parts.length != 3) {
-                System.out.println("[Client] Uso: insertMarketOrder <bid/ask> <size>");
-                System.out.println("[Client] Esempio: insertMarketOrder ask 500  (vendi 0.5 BTC al prezzo di mercato)");
-                return;
-            }
-
-            // Controllo connessione attiva
-            if (!isConnected()) {
-                return;
-            }
-
-            String type = parts[1].toLowerCase();
-            String sizeStr = parts[2];
-
-            // Validazione type
-            if (!type.equals("bid") && !type.equals("ask")) {
-                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
-                return;
-            }
-
-            // Parsing size
-            int size;
-            try {
-                size = Integer.parseInt(sizeStr);
-            } catch (NumberFormatException e) {
-                System.out.println("[Client] Size deve essere un numero intero (millesimi)");
-                return;
-            }
-
-            // Validazione size
-            if (size <= 0) {
-                System.out.println("[Client] Size deve essere maggiore di zero");
-                return;
-            }
-
-            // Costruzione richiesta JSON secondo ALLEGATO 1
-            JsonObject request = new JsonObject();
-            request.addProperty("operation", "insertMarketOrder");
-
-            JsonObject values = new JsonObject();
-            values.addProperty("type", type);
-            values.addProperty("size", size);
-            request.add("values", values);
-
-            // Invio richiesta e ricezione risposta
-            out.println(request.toString());
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
-
-            // Parsing risposta secondo formato ALLEGATO 1
-            int orderId = response.get("orderId").getAsInt();
-
-            if (orderId != -1) {
-                System.out.println("[Client] Market Order eseguito con successo - ID: " + orderId);
-                System.out.println("[Client] " + (type.equals("bid") ? "Acquistato" : "Venduto") + " " +
-                        formatSize(size) + " BTC al prezzo di mercato");
-            } else {
-                System.out.println("[Client] Errore esecuzione Market Order - liquidità insufficiente nell'order book");
-            }
-
-        } catch (Exception e) {
-            System.err.println("[Client] Errore durante insertMarketOrder: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Gestisce il comando insertStopOrder dal client
-     * Sintassi: insertStopOrder <bid/ask> <size> <stopPrice>
-     *
-     * @param parts comando parsato dall'input utente
-     */
-    private static void handleInsertStopOrder(String[] parts) {
-        try {
-            // Validazione numero parametri
-            if (parts.length != 4) {
-                System.out.println("[Client] Uso: insertStopOrder <bid/ask> <size> <stopPrice>");
-                System.out.println("[Client] Esempio: insertStopOrder ask 1000 55000000  (stop loss: vendi 1 BTC se prezzo <= 55.000)");
-                return;
-            }
-
-            // Controllo connessione attiva
-            if (!isConnected()) {
-                return;
-            }
-
-            String type = parts[1].toLowerCase();
-            String sizeStr = parts[2];
-            String stopPriceStr = parts[3];
-
-            // Validazione type
-            if (!type.equals("bid") && !type.equals("ask")) {
-                System.out.println("[Client] Tipo deve essere 'bid' (acquisto) o 'ask' (vendita)");
-                return;
-            }
-
-            // Parsing numeri
-            int size, stopPrice;
-            try {
-                size = Integer.parseInt(sizeStr);
-                stopPrice = Integer.parseInt(stopPriceStr);
-            } catch (NumberFormatException e) {
-                System.out.println("[Client] Size e stopPrice devono essere numeri interi (millesimi)");
-                return;
-            }
-
-            // Validazione valori
-            if (size <= 0 || stopPrice <= 0) {
-                System.out.println("[Client] Size e stopPrice devono essere maggiori di zero");
-                return;
-            }
-
-            // Costruzione richiesta JSON secondo ALLEGATO 1
-            JsonObject request = new JsonObject();
-            request.addProperty("operation", "insertStopOrder");
-
-            JsonObject values = new JsonObject();
-            values.addProperty("type", type);
-            values.addProperty("size", size);
-            values.addProperty("price", stopPrice); // Nel JSON si chiama "price" ma è il stopPrice
-            request.add("values", values);
-
-            // Invio richiesta e ricezione risposta
-            out.println(request.toString());
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
-
-            // Parsing risposta secondo formato ALLEGATO 1
-            int orderId = response.get("orderId").getAsInt();
-
-            if (orderId != -1) {
-                System.out.println("[Client] Stop Order inserito con successo - ID: " + orderId);
-                System.out.println("[Client] " + (type.equals("bid") ? "Stop buy" : "Stop loss") + ": " +
-                        formatSize(size) + " BTC quando prezzo " +
-                        (type.equals("bid") ? ">=" : "<=") + " " + formatPrice(stopPrice) + " USD");
-            } else {
-                System.out.println("[Client] Errore inserimento Stop Order - verificare stopPrice vs prezzo corrente");
-            }
-
-        } catch (Exception e) {
-            System.err.println("[Client] Errore durante insertStopOrder: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Gestisce il comando cancelOrder dal client
-     * Sintassi: cancelOrder <orderId>
-     *
-     * @param parts comando parsato dall'input utente
-     */
-    private static void handleCancelOrder(String[] parts) {
-        try {
-            // Validazione numero parametri
-            if (parts.length != 2) {
-                System.out.println("[Client] Uso: cancelOrder <orderId>");
-                return;
-            }
-
-            // Controllo connessione attiva
-            if (!isConnected()) {
-                return;
-            }
-
-            String orderIdStr = parts[1];
-
-            // Parsing orderId
-            int orderId;
-            try {
-                orderId = Integer.parseInt(orderIdStr);
-            } catch (NumberFormatException e) {
-                System.out.println("[Client] OrderId deve essere un numero intero");
-                return;
-            }
-
-            if (orderId <= 0) {
-                System.out.println("[Client] OrderId deve essere maggiore di zero");
-                return;
-            }
-
-            // Costruzione richiesta JSON secondo ALLEGATO 1
-            JsonObject request = new JsonObject();
-            request.addProperty("operation", "cancelOrder");
-
-            JsonObject values = new JsonObject();
-            values.addProperty("orderId", orderId);
-            request.add("values", values);
-
-            // Invio richiesta e ricezione risposta
-            out.println(request.toString());
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
-
-            // Parsing risposta secondo formato ALLEGATO 1 (come updateCredentials)
-            int responseCode = response.get("response").getAsInt();
-            String errorMessage = response.get("errorMessage").getAsString();
-
-            // Interpretazione codici risposta secondo ALLEGATO 1
-            switch (responseCode) {
-                case 100:
-                    System.out.println("[Client] Ordine " + orderId + " cancellato con successo");
-                    break;
                 case 101:
-                    System.out.println("[Client] Impossibile cancellare ordine " + orderId +
-                            " - ordine non esistente, già eseguito o non di proprietà");
+                    System.out.println("[Client] Errore: utente non loggato");
                     break;
+
+                case 103:
+                    String errorMsg = response.has("message") ?
+                            response.get("message").getAsString() : "Parametri non validi";
+                    System.out.println("[Client] Errore: " + errorMsg);
+                    break;
+
                 default:
-                    System.out.println("[Client] Errore cancellazione ordine " + orderId +
-                            " (codice " + responseCode + "): " + errorMessage);
+                    System.out.println("[Client] Errore registrazione notifiche (codice " + responseCode + ")");
                     break;
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore durante cancelOrder: " + e.getMessage());
+            System.err.println("[Client] Errore durante registerPriceAlert: " + e.getMessage());
         }
     }
 
+    // === METODI PER GESTIONE MULTICAST LISTENER ===
+
     /**
-     * Gestisce il comando getPriceHistory dal client
-     * Sintassi: getPriceHistory <MMYYYY>
-     *
-     * @param parts comando parsato dall'input utente
+     * Avvia il listener multicast per ricevere notifiche prezzo dal server
      */
-    private static void handleGetPriceHistory(String[] parts) {
+    private static void startMulticastListener() {
         try {
-            // Validazione numero parametri
-            if (parts.length != 2) {
-                System.out.println("[Client] Uso: getPriceHistory <MMYYYY>");
-                System.out.println("[Client] Esempio: getPriceHistory 012025  (gennaio 2025)");
-                return;
+            if (multicastListener == null && currentLoggedUsername != null) {
+
+                // Crea e avvia listener con parametri da properties
+                multicastListener = new MulticastListener(multicastAddress, multicastPort, currentLoggedUsername);
+                multicastListener.start();
+
+                // Avvia thread separato per listener
+                multicastThread = new Thread(multicastListener, "MulticastListener-" + currentLoggedUsername);
+                multicastThread.setDaemon(true); // Thread daemon per non bloccare shutdown
+                multicastThread.start();
+
+                System.out.println("[Client] Listener multicast avviato per notifiche prezzo");
             }
-
-            // Controllo connessione attiva
-            if (!isConnected()) {
-                return;
-            }
-
-            String month = parts[1];
-
-            // Validazione formato mese (MMYYYY)
-            if (!isValidMonthFormat(month)) {
-                System.out.println("[Client] Formato mese non valido. Usare MMYYYY (es: 012025 per gennaio 2025)");
-                return;
-            }
-
-            // Costruzione richiesta JSON secondo ALLEGATO 1
-            JsonObject request = new JsonObject();
-            request.addProperty("operation", "getPriceHistory");
-
-            JsonObject values = new JsonObject();
-            values.addProperty("month", month);
-            request.add("values", values);
-
-            System.out.println("[Client] Richiesta dati storici per: " + formatMonthDisplay(month));
-
-            // Invio richiesta e ricezione risposta
-            out.println(request.toString());
-            String responseJson = in.readLine();
-            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
-
-            // Parsing risposta - formato definito dallo studente
-            if (response.has("error")) {
-                String errorMessage = response.get("error").getAsString();
-                System.out.println("[Client] Errore recupero dati storici: " + errorMessage);
-                return;
-            }
-
-            if (response.has("priceHistory")) {
-                displayPriceHistory(response.getAsJsonArray("priceHistory"), month);
-            } else {
-                System.out.println("[Client] Nessun dato storico disponibile per " + formatMonthDisplay(month));
-            }
-
         } catch (Exception e) {
-            System.err.println("[Client] Errore durante getPriceHistory: " + e.getMessage());
+            System.err.println("[Client] Errore avvio listener multicast: " + e.getMessage());
         }
     }
 
     /**
-     * Valida il formato del mese MMYYYY
-     *
-     * @param month stringa da validare
-     * @return true se formato corretto, false altrimenti
+     * Ferma il listener multicast
      */
-    private static boolean isValidMonthFormat(String month) {
-        if (month == null || month.length() != 6) {
-            return false;
-        }
-
+    private static void stopMulticastListener() {
         try {
-            int mm = Integer.parseInt(month.substring(0, 2));
-            int yyyy = Integer.parseInt(month.substring(2, 6));
+            if (multicastListener != null) {
+                multicastListener.stop();
 
-            return mm >= 1 && mm <= 12 && yyyy >= 2020 && yyyy <= 2030;
-        } catch (NumberFormatException e) {
-            return false;
-        }
-    }
+                if (multicastThread != null && multicastThread.isAlive()) {
+                    multicastThread.interrupt();
 
-    /**
-     * Formatta il mese per display utente
-     *
-     * @param month formato MMYYYY
-     * @return stringa formattata per display
-     */
-    private static String formatMonthDisplay(String month) {
-        if (month.length() != 6) return month;
+                    // Aspetta terminazione thread per max 2 secondi
+                    try {
+                        multicastThread.join(2000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
 
-        String[] monthNames = {"", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
-                "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"};
+                multicastListener = null;
+                multicastThread = null;
 
-        try {
-            int mm = Integer.parseInt(month.substring(0, 2));
-            int yyyy = Integer.parseInt(month.substring(2, 6));
-            return monthNames[mm] + " " + yyyy;
+                System.out.println("[Client] Listener multicast fermato");
+            }
         } catch (Exception e) {
-            return month;
+            System.err.println("[Client] Errore durante stop listener multicast: " + e.getMessage());
         }
     }
 
-    /**
-     * Visualizza i dati storici OHLC in formato tabellare
-     *
-     * @param priceHistory array JSON con i dati storici
-     * @param month mese richiesto (MMYYYY)
-     */
-    private static void displayPriceHistory(JsonArray priceHistory, String month) {
-        System.out.println("[Client] Dati storici per " + formatMonthDisplay(month) + ":");
-        System.out.println("");
-        System.out.println("┌────────────┬─────────────┬─────────────┬─────────────┬─────────────┐");
-        System.out.println("│    Data    │   Apertura  │   Massimo   │   Minimo    │  Chiusura   │");
-        System.out.println("├────────────┼─────────────┼─────────────┼─────────────┼─────────────┤");
+    // === METODI ESISTENTI TRADING (DA IMPLEMENTARE) ===
 
-        for (int i = 0; i < priceHistory.size(); i++) {
-            JsonObject dayData = priceHistory.get(i).getAsJsonObject();
-
-            String date = dayData.get("date").getAsString();
-            double open = dayData.get("open").getAsDouble() / 1000.0;    // Conversione da millesimi
-            double high = dayData.get("high").getAsDouble() / 1000.0;    // Conversione da millesimi
-            double low = dayData.get("low").getAsDouble() / 1000.0;      // Conversione da millesimi
-            double close = dayData.get("close").getAsDouble() / 1000.0;  // Conversione da millesimi
-
-            System.out.printf("│ %10s │ %9.3f $ │ %9.3f $ │ %9.3f $ │ %9.3f $ │%n",
-                    date, open, high, low, close);
-        }
-
-        System.out.println("└────────────┴─────────────┴─────────────┴─────────────┴─────────────┘");
-        System.out.println("[Client] Visualizzati " + priceHistory.size() + " giorni di dati storici");
+    private static void handleUpdateCredentials(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando updateCredentials non ancora implementato");
     }
 
-    /**
-     * Mostra il prezzo corrente di mercato del BTC
-     * Comando locale - non richiede comunicazione con server
-     */
+    private static void handleInsertLimitOrder(String[] parts) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando insertLimitOrder non ancora implementato");
+    }
+
+    private static void handleInsertMarketOrder(String[] parts) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando insertMarketOrder non ancora implementato");
+    }
+
+    private static void handleInsertStopOrder(String[] parts) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando insertStopOrder non ancora implementato");
+    }
+
+    private static void handleCancelOrder(String[] parts) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando cancelOrder non ancora implementato");
+    }
+
     private static void handleMarketPrice() {
-        System.out.println("[Client] Comando locale - per il prezzo corrente consultare il server dopo un trade");
-        System.out.println("[Client] Il prezzo viene aggiornato ad ogni esecuzione di ordini");
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando marketPrice non ancora implementato");
     }
 
-// ✅ METODI HELPER AGGIUNTIVI (da aggiungere alla classe ClientMain)
-
-    /**
-     * Formatta size in millesimi per display utente (es: 1000 -> "1.000 BTC")
-     */
-    private static String formatSize(int sizeInMilliths) {
-        return String.format("%.3f", sizeInMilliths / 1000.0);
+    private static void handleGetPriceHistory(String[] parts) {
+        // TODO: Implementazione esistente
+        System.out.println("[Client] Comando getPriceHistory non ancora implementato");
     }
 
-    /**
-     * Formatta price in millesimi per display utente (es: 58000000 -> "58,000.000 USD")
-     */
-    private static String formatPrice(int priceInMilliths) {
-        return String.format("%,.3f", priceInMilliths / 1000.0);
-    }
+    // === UTILITY METHODS ===
 
     /**
-     * Verifica se il client è connesso al server
-     * Controlla sia l'esistenza del socket che lo stato di connessione
-     * per gestire correttamente socket chiusi o non inizializzati
+     * Formatta prezzo in millesimi per display user-friendly
      *
-     * @return true se connesso e socket attivo, false altrimenti
+     * @param priceInMillis prezzo in millesimi USD
+     * @return prezzo formattato (es: "58.000")
      */
-    private static boolean isConnected() {
-        if (tcpSocket == null || !tcpSocket.isConnected()) {
-            System.out.println("[Client] Non connesso al server. Effettuare prima il login.");
-            return false;
-        }
-        return true;
+    private static String formatPrice(int priceInMillis) {
+        return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
     /**
-     * Chiude tutte le risorse del client in modo ordinato
-     * Garantisce cleanup completo di tutte le risorse allocate
+     * Esegue lo shutdown ordinato del client
+     * Ferma listener multicast, chiude connessioni TCP, libera risorse
      */
     private static void shutdownClient() {
-        System.out.println("[Client] Avvio procedura di shutdown...");
+        System.out.println("[Client] Iniziando shutdown del client...");
 
-        // Imposta flag di terminazione per tutti i thread
         running = false;
 
-        // Chiusura connessione TCP se attiva
+        // Ferma listener multicast
+        stopMulticastListener();
+
+        // Chiusura connessioni TCP
         try {
+            if (out != null) out.close();
+            if (in != null) in.close();
             if (tcpSocket != null && !tcpSocket.isClosed()) {
                 tcpSocket.close();
-                System.out.println("[Client] Connessione TCP chiusa");
             }
         } catch (IOException e) {
-            System.err.println("[Client] Errore chiusura connessione TCP: " + e.getMessage());
+            System.err.println("[Client] Errore chiusura connessioni: " + e.getMessage());
         }
 
-        // Shutdown del thread pool
-        if (pool != null && !pool.isShutdown()) {
+        // Chiusura thread pool
+        if (pool != null) {
+            pool.shutdown();
             try {
-                pool.shutdown();
                 if (!pool.awaitTermination(2, TimeUnit.SECONDS)) {
                     pool.shutdownNow();
-                    System.out.println("[Client] Thread pool terminato forzatamente");
-                } else {
-                    System.out.println("[Client] Thread pool terminato correttamente");
                 }
             } catch (InterruptedException e) {
                 pool.shutdownNow();
@@ -1081,10 +767,9 @@ public class ClientMain {
             }
         }
 
-        // Chiusura scanner input
+        // Chiusura scanner
         if (userScanner != null) {
             userScanner.close();
-            System.out.println("[Client] Scanner input chiuso");
         }
 
         System.out.println("[Client] Shutdown completato");

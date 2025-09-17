@@ -20,6 +20,7 @@ import java.util.concurrent.TimeUnit;
  * - Registrazioni via RMI
  * - Login e operazioni via TCP
  * - Thread pool per gestire client multipli
+ * - Servizio multicast per notifiche prezzo (vecchio ordinamento)
  * - Thread per ascoltare comandi da terminale ("esci")
  * - Configurazione centralizzata tramite file properties
  * - Mappa socket-utente per gestione ottimizzata del login/logout
@@ -43,8 +44,9 @@ public class ServerMain {
      * 1. Caricamento configurazione da file properties
      * 2. Parsing e validazione parametri
      * 3. Avvio server RMI per registrazioni
-     * 4. Avvio server TCP per operazioni client
-     * 5. Gestione shutdown ordinato in caso di errori
+     * 4. Avvio servizio multicast per notifiche prezzo
+     * 5. Avvio server TCP per operazioni client
+     * 6. Gestione shutdown ordinato in caso di errori
      *
      * @param args argomenti da linea di comando
      */
@@ -66,11 +68,18 @@ public class ServerMain {
         int tcpPort;
         int rmiPort;
         int socketTimeout;
+        String multicastAddress;
+        int multicastPort;
 
         try {
             tcpPort = parseRequiredIntProperty(config, "TCP.port");
             rmiPort = parseRequiredIntProperty(config, "RMI.port");
             socketTimeout = parseRequiredIntProperty(config, "socket.timeout");
+
+            // Lettura parametri multicast da properties (vecchio ordinamento)
+            multicastAddress = parseRequiredStringProperty(config, "multicast.address");
+            multicastPort = parseRequiredIntProperty(config, "multicast.port");
+
         } catch (IllegalArgumentException e) {
             System.err.println("[Server] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
@@ -82,13 +91,19 @@ public class ServerMain {
         System.out.println("[Server] - TCP Port: " + tcpPort);
         System.out.println("[Server] - RMI Port: " + rmiPort);
         System.out.println("[Server] - Socket Timeout: " + socketTimeout + "ms");
+        System.out.println("[Server] - Multicast Address: " + multicastAddress);
+        System.out.println("[Server] - Multicast Port: " + multicastPort);
 
         // Avvio server RMI per registrazioni
         try {
             startRMIServer(rmiPort);
             OrderManager.initialize();
+
+            // Inizializzazione servizio multicast per notifiche prezzo (vecchio ordinamento)
+            PriceNotificationService.initialize(multicastAddress, multicastPort);
+
         } catch (Exception e) {
-            System.err.println("[Server] Errore avvio connessione RMI: " + e.getMessage());
+            System.err.println("[Server] Errore avvio servizi: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         }
@@ -154,6 +169,24 @@ public class ServerMain {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Valore non valido per " + key + ": " + value + " (deve essere un numero intero)");
         }
+    }
+
+    /**
+     * Effettua il parsing di una stringa da Properties
+     *
+     * @param props oggetto Properties contenente la configurazione
+     * @param key chiave da cercare nel file properties
+     * @return valore della property con trim applicato
+     * @throws IllegalArgumentException se la property manca o è vuota
+     */
+    private static String parseRequiredStringProperty(Properties props, String key) {
+        String value = props.getProperty(key);
+
+        if (value == null || value.trim().isEmpty()) {
+            throw new IllegalArgumentException("Parametro mancante nel file server.properties: " + key);
+        }
+
+        return value.trim();
     }
 
     /**
@@ -233,99 +266,78 @@ public class ServerMain {
 
             } catch (IOException e) {
                 if (running) {
-                    System.err.println("[Server] Errore connessione TCP: " + e.getMessage());
+                    System.err.println("[Server] Errore accettazione connessione client: " + e.getMessage());
                 }
             }
         }
     }
 
     /**
-     * Thread per ascoltare comandi da terminale
-     * Permette chiusura ordinata del server digitando "esci"
+     * Thread separato per ascoltare comandi da terminale server
+     * Permette di terminare il server digitando "esci" nel terminale
      */
     private static void listenForTerminalCommands() {
-        Scanner scanner = new Scanner(System.in);
-
-        System.out.println("[Server] Digita 'esci' per terminare il server");
+        Scanner terminalScanner = new Scanner(System.in);
+        System.out.println("[Server] Digitare 'esci' per terminare il server");
 
         while (running) {
             try {
-                String command = scanner.nextLine().trim().toLowerCase();
-
+                String command = terminalScanner.nextLine().trim().toLowerCase();
                 if ("esci".equals(command)) {
-                    System.out.println("[Server] Comando di arresto ricevuto...");
-
-                    // Imposta flag per terminazione thread-safe
+                    System.out.println("[Server] Comando di terminazione ricevuto");
                     running = false;
-
-                    // Forza chiusura server socket per uscire da accept()
-                    if (serverSocket != null && !serverSocket.isClosed()) {
-                        serverSocket.close();
-                    }
-
                     break;
-                } else if (!command.isEmpty()) {
-                    System.out.println("[Server] Comando non riconosciuto: " + command);
-                    System.out.println("[Server] Digita 'esci' per terminare il server");
                 }
             } catch (Exception e) {
                 if (running) {
-                    System.err.println("[Server] Errore lettura comando: " + e.getMessage());
+                    System.err.println("[Server] Errore lettura comando terminale: " + e.getMessage());
                 }
-                // Se c'è un errore nell'input, termina il thread
-                break;
             }
         }
 
-        // Chiude scanner locale del thread
-        scanner.close();
-
-        // Forza chiusura del server se non già fatto
-        if (running) {
-            running = false;
-        }
+        terminalScanner.close();
+        System.out.println("[Server] Listener comandi terminale terminato");
     }
 
     /**
-     * Effettua chiusura ordinata del server
-     * Garantisce terminazione pulita di tutte le risorse allocate.
+     * Esegue lo shutdown ordinato del server
+     * Chiude tutti i socket, ferma thread pool, libera risorse
      */
     private static void shutdownServer() {
-        System.out.println("[Server] Chiusura del server in corso...");
+        System.out.println("[Server] Iniziando shutdown del server...");
 
-        // Imposta flag di terminazione per tutti i thread
-        running = false;
+        try {
+            running = false;
 
-        // Chiude server socket se ancora aperto
-        if (serverSocket != null && !serverSocket.isClosed()) {
-            try {
-                serverSocket.close();
-                System.out.println("[Server] Server socket chiuso");
-            } catch (IOException e) {
-                System.err.println("[Server] Errore chiusura server socket: " + e.getMessage());
-            }
-        }
-
-        // Chiusura del thread pool con timeout
-        if (pool != null && !pool.isShutdown()) {
-            pool.shutdown(); // Non accetta nuovi task
-
-            try {
-                // Aspetta terminazione task attivi per 5 secondi
-                if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
-                    System.out.println("[Server] Chiusura forzata del thread pool...");
-                    pool.shutdownNow(); // Forza terminazione
+            // Chiusura thread pool
+            if (pool != null) {
+                pool.shutdown();
+                try {
+                    if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
+                        pool.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    pool.shutdownNow();
+                    Thread.currentThread().interrupt();
                 }
-                System.out.println("[Server] Thread pool terminato");
-
-            } catch (InterruptedException e) {
-                System.err.println("[Server] Interruzione durante chiusura thread pool");
-                pool.shutdownNow();
-                Thread.currentThread().interrupt();
             }
-        }
 
-        System.out.println("[Server] Server terminato correttamente.");
-        System.exit(0);
+            // Chiusura server socket
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+
+            // Shutdown servizio multicast
+            PriceNotificationService.shutdown();
+
+            // Cleanup mappa utenti loggati
+            socketUserMap.clear();
+
+            System.out.println("[Server] Shutdown completato");
+            System.exit(0);
+
+        } catch (Exception e) {
+            System.err.println("[Server] Errore durante shutdown: " + e.getMessage());
+        }
     }
 }

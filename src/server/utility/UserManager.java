@@ -214,6 +214,120 @@ public class UserManager {
         return usersLock;
     }
 
+
+    /**
+     * Valida le credenziali di un utente confrontando username e password
+     * con i dati memorizzati nel file JSON
+     *
+     * @param username nome utente da verificare
+     * @param password password da verificare
+     * @return true se le credenziali sono corrette, false altrimenti
+     */
+    public static boolean validateCredentials(String username, String password) {
+        try {
+            if (username == null || password == null ||
+                    username.trim().isEmpty() || password.trim().isEmpty()) {
+                return false;
+            }
+
+            // Carica lista utenti dal file JSON
+            JsonArray users = loadUsers();
+
+            // Cerca l'utente nella lista
+            JsonObject user = findUser(users, username);
+            if (user == null) {
+                return false; // Utente non trovato
+            }
+
+            // Confronta password (in chiaro - come da specifiche del progetto)
+            String storedPassword = user.get("password").getAsString();
+            return password.equals(storedPassword);
+
+        } catch (Exception e) {
+            System.err.println("[UserManager] Errore validazione credenziali: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Valida una password secondo i criteri del sistema
+     * Le specifiche del progetto non definiscono criteri particolari,
+     * quindi implementiamo validazione base
+     *
+     * @param password password da validare
+     * @return true se la password è valida, false altrimenti
+     */
+    public static boolean isValidPassword(String password) {
+        // Criteri di validazione base secondo le specifiche del progetto
+        if (password == null) {
+            return false;
+        }
+
+        // La password non può essere completamente vuota o contenere solo spazi
+        if (password.trim().isEmpty()) {
+            return false;
+        }
+
+        // Le specifiche non richiedono criteri particolari,
+        // quindi accettiamo qualsiasi password non vuota
+        return true;
+    }
+
+    /**
+     * Aggiorna la password di un utente esistente nel sistema
+     * Verifica che l'utente esista e che la password attuale sia corretta
+     * prima di procedere con l'aggiornamento
+     *
+     * @param username nome utente di cui aggiornare la password
+     * @param oldPassword password attuale (per verifica)
+     * @param newPassword nuova password da impostare
+     * @return true se aggiornamento riuscito, false se errore
+     */
+    public static boolean updatePassword(String username, String oldPassword, String newPassword) {
+        usersLock.writeLock().lock();
+        try {
+            // Validazione parametri
+            if (!isValidPassword(newPassword)) {
+                return false;
+            }
+
+            // Carica lista utenti
+            JsonArray users = loadUsers();
+
+            // Cerca l'utente
+            JsonObject user = findUser(users, username);
+            if (user == null) {
+                return false; // Utente non trovato
+            }
+
+            // Verifica password attuale
+            String storedPassword = user.get("password").getAsString();
+            if (!oldPassword.equals(storedPassword)) {
+                return false; // Password attuale non corretta
+            }
+
+            // Verifica che nuova password sia diversa dalla vecchia
+            if (oldPassword.equals(newPassword)) {
+                return false; // Stessa password
+            }
+
+            // Aggiorna password nell'oggetto utente
+            user.addProperty("password", newPassword);
+
+            // Salva lista utenti aggiornata
+            saveUsers(users);
+
+            System.out.println("[UserManager] Password aggiornata per utente: " + username);
+            return true;
+
+        } catch (Exception e) {
+            System.err.println("[UserManager] Errore aggiornamento password: " + e.getMessage());
+            return false;
+        } finally {
+            usersLock.writeLock().unlock();
+        }
+    }
+
     /**
      * Getter per il path del file utenti
      *
