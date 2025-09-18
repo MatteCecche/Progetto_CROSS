@@ -911,19 +911,19 @@ public class OrderManager {
 
     // === UTILITY METHODS ===
 
-    private static Integer getBestBidPrice() {
+    public static Integer getBestBidPrice() {
         return bidOrders.keySet().stream().max(Integer::compareTo).orElse(null);
     }
 
-    private static Integer getBestAskPrice() {
+    public static Integer getBestAskPrice() {
         return askOrders.keySet().stream().min(Integer::compareTo).orElse(null);
     }
 
-    private static String formatPrice(int priceInMilliths) {
+    public static String formatPrice(int priceInMilliths) {
         return String.format("%,.0f", priceInMilliths / 1000.0);
     }
 
-    private static String formatSize(int sizeInMilliths) {
+    public static String formatSize(int sizeInMilliths) {
         return String.format("%.3f", sizeInMilliths / 1000.0);
     }
 
