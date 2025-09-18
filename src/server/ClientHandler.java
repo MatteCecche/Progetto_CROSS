@@ -469,42 +469,54 @@ public class ClientHandler implements Runnable {
     }
 
     /**
-     * Gestisce richiesta storico prezzi mensile
+     * Gestisce richiesta di storico prezzi per un mese specifico
+     * Formato JSON secondo ALLEGATO 1: month=STRING(MMYYYY)
      *
-     * @param request JSON con month (MMYYYY) secondo ALLEGATO 1
-     * @return JsonObject con dati storici (formato da definire)
+     * @param request JSON con month in formato MMYYYY
+     * @return JsonObject con dati storici OHLC per ogni giorno
      */
     private JsonObject handleGetPriceHistory(JsonObject request) {
         try {
             // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
-                // TODO: Verificare se questa operazione richiede autenticazione dalle specifiche
                 return createErrorResponse(101, "Utente non loggato");
             }
 
             // Validazione formato richiesta
             if (!request.has("values")) {
-                return createErrorResponse(101, "Formato richiesta non valido: manca campo values");
+                return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String month = getStringValue(values, "month"); // Formato MMYYYY
+            if (!values.has("month")) {
+                return createErrorResponse(103, "Formato richiesta non valido: manca parametro month");
+            }
 
-            // TODO: Implementare logica per recupero dati storici dal file storicoOrdini.json
-            // Calcolare per ogni giorno: prezzo apertura, chiusura, massimo, minimo
+            String month = getStringValue(values, "month");
+            if (month.isEmpty()) {
+                return createErrorResponse(103, "Parametro month non può essere vuoto");
+            }
 
-            System.out.println("[ClientHandler] Richiesta storico prezzi per: " + month);
+            System.out.println("[ClientHandler] Richiesta storico prezzi per mese: " + month +
+                    " da utente: " + loggedUsername);
 
-            // Risposta temporanea - da implementare
-            JsonObject response = new JsonObject();
-            response.addProperty("message", "Funzionalità getPriceHistory in sviluppo");
-            response.addProperty("month", month);
-            return response;
+            // Chiamata a OrderManager per ottenere i dati storici
+            JsonObject historyData = OrderManager.getPriceHistory(month);
+
+            // Controlla se c'è stato un errore
+            if (historyData.has("error")) {
+                return createErrorResponse(103, historyData.get("error").getAsString());
+            }
+
+            System.out.println("[ClientHandler] Storico prezzi generato per " + month +
+                    ": " + historyData.get("totalDays").getAsInt() + " giorni");
+
+            return historyData;
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore getPriceHistory: " + e.getMessage());
-            return createErrorResponse(101, "Errore interno server");
+            return createErrorResponse(103, "Errore interno del server durante generazione storico");
         }
     }
 

@@ -714,9 +714,193 @@ public class ClientMain {
         System.out.println("[Client] Comando marketPrice non ancora implementato");
     }
 
+    /**
+     * Gestisce comando getPriceHistory dell'utente
+     * Formato comando: getPriceHistory <MMYYYY>
+     *
+     * @param parts comando parsato dall'input utente
+     */
     private static void handleGetPriceHistory(String[] parts) {
-        // TODO: Implementazione esistente
-        System.out.println("[Client] Comando getPriceHistory non ancora implementato");
+        try {
+            // Validazione parametri
+            if (parts.length != 2) {
+                System.out.println("[Client] Uso: getPriceHistory <MMYYYY>");
+                System.out.println("[Client] Esempio: getPriceHistory 012025 (per gennaio 2025)");
+                return;
+            }
+
+            String month = parts[1];
+
+            // Validazione formato mese
+            if (month.length() != 6) {
+                System.out.println("[Client] Formato mese non valido. Usare MMYYYY (es: 012025)");
+                return;
+            }
+
+            try {
+                int monthInt = Integer.parseInt(month.substring(0, 2));
+                int yearInt = Integer.parseInt(month.substring(2, 6));
+
+                if (monthInt < 1 || monthInt > 12 || yearInt < 2020 || yearInt > 2030) {
+                    System.out.println("[Client] Mese o anno non valido. Mese: 01-12, Anno: 2020-2030");
+                    return;
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("[Client] Formato mese non numerico. Usare MMYYYY (es: 012025)");
+                return;
+            }
+
+            // Controllo connessione TCP
+            if (tcpSocket == null || tcpSocket.isClosed()) {
+                System.out.println("[Client] Errore: non connesso al server. Effettuare login prima.");
+                return;
+            }
+
+            // Costruzione richiesta JSON secondo ALLEGATO 1
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "getPriceHistory");
+
+            JsonObject values = new JsonObject();
+            values.addProperty("month", month);
+            request.add("values", values);
+
+            // Invio richiesta al server
+            out.println(request.toString());
+
+            // Lettura risposta
+            String responseStr = in.readLine();
+            if (responseStr == null) {
+                System.out.println("[Client] Errore: connessione al server persa");
+                return;
+            }
+
+            // Parsing risposta JSON
+            JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
+
+            // Gestione risposta
+            if (response.has("error")) {
+                System.out.println("[Client] Errore: " + response.get("error").getAsString());
+                return;
+            }
+
+            if (!response.has("priceHistory")) {
+                System.out.println("[Client] Errore: risposta server non valida");
+                return;
+            }
+
+            // Estrazione dati
+            String responseMonth = response.get("month").getAsString();
+            int totalDays = response.get("totalDays").getAsInt();
+            JsonArray historyData = response.getAsJsonArray("priceHistory");
+
+            // Display risultati
+            displayPriceHistory(responseMonth, totalDays, historyData);
+
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante getPriceHistory: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Visualizza i dati storici dei prezzi in formato tabellare user-friendly
+     * Mostra OHLC (Open, High, Low, Close) + Volume per ogni giorno
+     *
+     * @param month mese richiesto in formato MMYYYY
+     * @param totalDays numero totale di giorni con dati
+     * @param historyData array JSON contenente i dati storici
+     */
+    private static void displayPriceHistory(String month, int totalDays, JsonArray historyData) {
+        System.out.println("\n" + "=".repeat(80));
+        System.out.println("📈 STORICO PREZZI BTC - " + formatMonthYear(month));
+        System.out.println("=".repeat(80));
+
+        if (totalDays == 0) {
+            System.out.println("Nessun dato disponibile per il mese richiesto.");
+            System.out.println("Potrebbe essere necessario eseguire alcune operazioni di trading prima.");
+            System.out.println("=".repeat(80));
+            return;
+        }
+
+        System.out.println("Giorni con dati: " + totalDays);
+        System.out.println();
+
+        // Header tabella
+        System.out.printf("%-12s %-10s %-10s %-10s %-10s %-12s %-8s%n",
+                "Data", "Apertura", "Massimo", "Minimo", "Chiusura", "Volume", "Trade");
+        System.out.println("-".repeat(80));
+
+        // Dati per ogni giorno
+        for (int i = 0; i < historyData.size(); i++) {
+            JsonObject dayData = historyData.get(i).getAsJsonObject();
+
+            String date = dayData.get("date").getAsString();
+            int openPrice = dayData.get("openPrice").getAsInt();
+            int highPrice = dayData.get("highPrice").getAsInt();
+            int lowPrice = dayData.get("lowPrice").getAsInt();
+            int closePrice = dayData.get("closePrice").getAsInt();
+            int volume = dayData.get("volume").getAsInt();
+            int tradesCount = dayData.get("tradesCount").getAsInt();
+
+            // Formatta e mostra riga
+            System.out.printf("%-12s %-10s %-10s %-10s %-10s %-12s %-8d%n",
+                    formatDate(date),
+                    formatPrice(openPrice),
+                    formatPrice(highPrice),
+                    formatPrice(lowPrice),
+                    formatPrice(closePrice),
+                    formatVolume(volume),
+                    tradesCount);
+        }
+
+        System.out.println("=".repeat(80));
+        System.out.println("💡 Prezzi in USD, Volume in BTC");
+    }
+
+    /**
+     * Formatta mese da MMYYYY a formato leggibile
+     *
+     * @param monthYear formato MMYYYY (es: "012025")
+     * @return formato leggibile (es: "Gennaio 2025")
+     */
+    private static String formatMonthYear(String monthYear) {
+        try {
+            int month = Integer.parseInt(monthYear.substring(0, 2));
+            String year = monthYear.substring(2, 6);
+
+            String[] mesi = {
+                    "", "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                    "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+            };
+
+            return mesi[month] + " " + year;
+        } catch (Exception e) {
+            return monthYear; // Fallback al formato originale
+        }
+    }
+
+    /**
+     * Formatta data da YYYY-MM-DD a formato leggibile
+     *
+     * @param dateStr data in formato ISO (es: "2025-01-15")
+     * @return data formattata (es: "15/01/2025")
+     */
+    private static String formatDate(String dateStr) {
+        try {
+            String[] parts = dateStr.split("-");
+            return parts[2] + "/" + parts[1] + "/" + parts[0];
+        } catch (Exception e) {
+            return dateStr; // Fallback al formato originale
+        }
+    }
+
+    /**
+     * Formatta volume in formato leggibile
+     *
+     * @param volumeInMillis volume in millesimi di BTC
+     * @return volume formattato (es: "1.250 BTC")
+     */
+    private static String formatVolume(int volumeInMillis) {
+        return String.format("%.3f BTC", volumeInMillis / 1000.0);
     }
 
     // === UTILITY METHODS ===

@@ -10,10 +10,15 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.stream.Collectors;
 
 /**
  * Gestisce il sistema di trading e order book del sistema CROSS
@@ -22,9 +27,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - Gestione ordini: Limit Order, Market Order, Stop Order
  * - Matching engine per esecuzione automatica ordini
  * - Generazione orderId univoci e thread-safe
- * - Persistenza ordini eseguiti in formato JSON
+ * - Persistenza unificata in StoricoOrdini.json con formattazione
  * - Notifiche multicast per soglie prezzo (vecchio ordinamento)
- * - Notifiche per ordini finalizzati
+ * - Calcolo OHLC per storico prezzi
  *
  * Utilizza strutture thread-safe per gestione concorrente di ordini multipli
  * Size e Price sono espressi in millesimi secondo specifiche:
@@ -32,18 +37,21 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class OrderManager {
 
+    // === CONFIGURAZIONE FILE UNIFICATO ===
+
+    // File unico per tutti i trade/ordini storici
+    private static final String STORICO_FILE = "data/StoricoOrdini.json";
+
     // Generatore thread-safe per orderId univoci
     private static final AtomicInteger orderIdGenerator = new AtomicInteger(1);
-
-    // File per persistenza ordini eseguiti
-    private static final String ORDERS_FILE = "data/orders.json";
 
     // Lock per sincronizzazione accesso concorrente alle strutture dati
     private static final ReentrantReadWriteLock ordersLock = new ReentrantReadWriteLock();
 
-    // Configurazione Gson per pretty printing JSON
+    // Configurazione Gson per JSON formattato con indentazione (come da specifiche)
     private static final Gson gson = new GsonBuilder()
-            .setPrettyPrinting()
+            .setPrettyPrinting()        // Abilita formattazione con spazi
+            .disableHtmlEscaping()      // Non escape caratteri HTML
             .create();
 
     // === ORDER BOOK STRUCTURES (Thread-Safe) ===
@@ -111,11 +119,101 @@ public class OrderManager {
         }
     }
 
+    // === GESTIONE FILE STORICO UNIFICATO ===
+
     /**
-     * Inizializza il sistema di gestione ordini
-     * Configura filesystem e strutture dati necessarie
+     * Carica tutti i trade/ordini dal file StoricoOrdini.json unificato
+     * Struttura: { "trades": [ {...}, {...} ] }
      *
-     * @throws IOException se errori nell'inizializzazione del filesystem
+     * @return JsonArray contenente tutti i record dal file storico
+     * @throws IOException se errori nella lettura del file
+     */
+    private static JsonArray loadStoricoOrdini() throws IOException {
+        ordersLock.readLock().lock();
+        try {
+            File storicoFile = new File(STORICO_FILE);
+
+            if (!storicoFile.exists()) {
+                System.out.println("[OrderManager] File " + STORICO_FILE + " non trovato, creo struttura vuota");
+                return new JsonArray();
+            }
+
+            try (FileReader reader = new FileReader(STORICO_FILE)) {
+                JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
+
+                if (root.has("trades") && root.get("trades").isJsonArray()) {
+                    JsonArray trades = root.getAsJsonArray("trades");
+                    return trades;
+                } else {
+                    System.out.println("[OrderManager] Struttura 'trades' non trovata, creo array vuoto");
+                    return new JsonArray();
+                }
+
+            } catch (Exception e) {
+                System.err.println("[OrderManager] Errore parsing " + STORICO_FILE + ": " + e.getMessage());
+                return new JsonArray();
+            }
+
+        } finally {
+            ordersLock.readLock().unlock();
+        }
+    }
+
+    /**
+     * Salva tutti i record nel file StoricoOrdini.json con formattazione pulita
+     * Mantiene la struttura: { "trades": [ ... ] }
+     * Il JSON sarà formattato con indentazione (come da specifiche)
+     *
+     * @param trades JsonArray con tutti i record
+     * @throws IOException se errori nella scrittura
+     */
+    private static void saveStoricoOrdini(JsonArray trades) throws IOException {
+        ordersLock.writeLock().lock();
+        try {
+            // Struttura unificata del file con formattazione
+            JsonObject root = new JsonObject();
+            root.add("trades", trades);
+
+            // Scrivi il file con formattazione pretty
+            try (FileWriter writer = new FileWriter(STORICO_FILE)) {
+                gson.toJson(root, writer);
+                writer.flush(); // Assicura che tutto sia scritto
+            }
+
+            System.out.println("[OrderManager] " + trades.size() + " record salvati in " + STORICO_FILE + " (formattato)");
+
+        } finally {
+            ordersLock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Aggiunge un nuovo trade/ordine al file storico
+     * Chiamato ogni volta che un trade viene eseguito
+     *
+     * @param tradeData JsonObject contenente i dati del trade
+     */
+    private static void addTradeToStorico(JsonObject tradeData) {
+        try {
+            // Carica tutti i record esistenti
+            JsonArray allRecords = loadStoricoOrdini();
+
+            // Aggiunge il nuovo record
+            allRecords.add(tradeData);
+
+            // Salva tutto con formattazione
+            saveStoricoOrdini(allRecords);
+
+        } catch (Exception e) {
+            System.err.println("[OrderManager] Errore aggiunta trade a storico: " + e.getMessage());
+        }
+    }
+
+    // === INIZIALIZZAZIONE SISTEMA ===
+
+    /**
+     * Initialize semplificato - usa solo StoricoOrdini.json
+     * Verifica/crea il file unificato e inizializza il generatore orderID
      */
     public static void initialize() throws IOException {
         // Crea directory data se non esiste
@@ -125,16 +223,73 @@ public class OrderManager {
             System.out.println("[OrderManager] Creata directory data/");
         }
 
-        // Crea file ordini vuoto se non esiste
-        File ordersFile = new File(ORDERS_FILE);
-        if (!ordersFile.exists()) {
-            initializeOrdersFile();
-            System.out.println("[OrderManager] Inizializzato file orders.json");
+        // Verifica/crea solo il file StoricoOrdini.json
+        File storicoFile = new File(STORICO_FILE);
+        if (storicoFile.exists()) {
+            System.out.println("[OrderManager] ✅ Trovato file storico: " + STORICO_FILE);
+            System.out.println("[OrderManager] Dimensione file: " + storicoFile.length() + " bytes");
+
+            // Test rapido per verificare la struttura
+            try {
+                JsonArray records = loadStoricoOrdini();
+                System.out.println("[OrderManager] ✅ File valido con " + records.size() + " record");
+
+                if (records.size() > 0) {
+                    // Mostra range temporale dei dati
+                    JsonObject firstRecord = records.get(0).getAsJsonObject();
+                    JsonObject lastRecord = records.get(records.size() - 1).getAsJsonObject();
+
+                    if (firstRecord.has("timestamp") && lastRecord.has("timestamp")) {
+                        long firstTimestamp = firstRecord.get("timestamp").getAsLong();
+                        long lastTimestamp = lastRecord.get("timestamp").getAsLong();
+
+                        LocalDate firstDate = Instant.ofEpochSecond(firstTimestamp)
+                                .atZone(ZoneId.of("GMT")).toLocalDate();
+                        LocalDate lastDate = Instant.ofEpochSecond(lastTimestamp)
+                                .atZone(ZoneId.of("GMT")).toLocalDate();
+
+                        System.out.println("[OrderManager] Range date: " + firstDate + " → " + lastDate);
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[OrderManager] ⚠️ Errore lettura storico: " + e.getMessage());
+            }
+        } else {
+            // Crea file vuoto con struttura corretta
+            System.out.println("[OrderManager] Creazione nuovo file " + STORICO_FILE);
+            JsonArray emptyTrades = new JsonArray();
+            saveStoricoOrdini(emptyTrades);
+            System.out.println("[OrderManager] ✅ File storico creato");
         }
 
-        System.out.println("[OrderManager] Sistema gestione ordini inizializzato");
+        // Inizializza il generatore di orderID dal file esistente
+        try {
+            JsonArray records = loadStoricoOrdini();
+            int maxOrderId = 0;
+
+            for (int i = 0; i < records.size(); i++) {
+                JsonObject record = records.get(i).getAsJsonObject();
+                if (record.has("orderId")) {
+                    int orderId = record.get("orderId").getAsInt();
+                    if (orderId > maxOrderId) {
+                        maxOrderId = orderId;
+                    }
+                }
+            }
+
+            // Imposta il prossimo ID disponibile
+            orderIdGenerator.set(maxOrderId + 1);
+            System.out.println("[OrderManager] Prossimo orderID: " + orderIdGenerator.get());
+
+        } catch (Exception e) {
+            System.err.println("[OrderManager] Errore inizializzazione orderID generator: " + e.getMessage());
+        }
+
+        System.out.println("[OrderManager] Sistema gestione ordini inizializzato (solo StoricoOrdini.json)");
         System.out.println("[OrderManager] Prezzo corrente BTC: " + formatPrice(currentMarketPrice) + " USD");
     }
+
+    // === OPERAZIONI ORDINI ===
 
     /**
      * Inserisce un Limit Order nel sistema
@@ -312,191 +467,332 @@ public class OrderManager {
         }
     }
 
-    // === HELPER METHODS - VALIDAZIONE ===
+    // === STORICO PREZZI ===
 
-    private static boolean isValidOrderType(String type) {
-        return "bid".equals(type) || "ask".equals(type);
-    }
-
-    private static boolean isValidStopPrice(String type, int stopPrice) {
-        // Stop Buy: attivato quando prezzo >= stopPrice (protezione short position)
-        // Stop Sell: attivato quando prezzo <= stopPrice (stop loss)
-        if ("bid".equals(type)) {
-            return stopPrice >= currentMarketPrice; // Stop buy sopra mercato
-        } else {
-            return stopPrice <= currentMarketPrice; // Stop sell sotto mercato
-        }
-    }
-
-    private static boolean hasLiquidity(String type, int requiredSize) {
-        // Market buy ha bisogno di ask orders, market sell ha bisogno di bid orders
-        Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(type) ?
-                askOrders : bidOrders;
-
-        int availableSize = 0;
-        for (LinkedList<Order> ordersAtPrice : bookToCheck.values()) {
-            for (Order order : ordersAtPrice) {
-                availableSize += order.getRemainingSize();
-                if (availableSize >= requiredSize) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    // === ORDER BOOK MANAGEMENT ===
-
-    private static void addToBidBook(Order order) {
-        bidOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
-    }
-
-    private static void addToAskBook(Order order) {
-        askOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
-    }
-
-    private static boolean removeFromOrderBook(Order order) {
+    /**
+     * Implementa getPriceHistory leggendo dal file StoricoOrdini.json unificato
+     * Calcola OHLC (Open, High, Low, Close) per ogni giorno del mese richiesto
+     *
+     * @param monthYear formato "MMYYYY" (es: "012025" per gennaio 2025)
+     * @return JsonObject con dati storici OHLC secondo specifiche ALLEGATO 1
+     */
+    public static JsonObject getPriceHistory(String monthYear) {
         try {
-            if ("stop".equals(order.getOrderType())) {
-                return stopOrders.remove(order.getOrderId()) != null;
+            // Validazione formato input
+            if (monthYear == null || monthYear.length() != 6) {
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Formato mese non valido. Usare MMYYYY (es: 012025)");
+                return error;
             }
 
-            Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ?
-                    bidOrders : askOrders;
-            LinkedList<Order> ordersAtPrice = book.get(order.getPrice());
+            String month = monthYear.substring(0, 2);
+            String year = monthYear.substring(2, 6);
 
-            if (ordersAtPrice != null) {
-                boolean removed = ordersAtPrice.remove(order);
-                if (ordersAtPrice.isEmpty()) {
-                    book.remove(order.getPrice());
+            int monthInt;
+            int yearInt;
+            try {
+                monthInt = Integer.parseInt(month);
+                yearInt = Integer.parseInt(year);
+
+                if (monthInt < 1 || monthInt > 12) {
+                    throw new NumberFormatException("Mese deve essere tra 01 e 12");
                 }
-                return removed;
+            } catch (NumberFormatException e) {
+                JsonObject error = new JsonObject();
+                error.addProperty("error", "Formato mese non valido: " + e.getMessage());
+                return error;
             }
-            return false;
+
+            // Carica tutti i record dal file storico unificato
+            JsonArray allRecords = loadStoricoOrdini();
+
+            if (allRecords.size() == 0) {
+                JsonObject response = new JsonObject();
+                response.addProperty("month", monthYear);
+                response.addProperty("totalDays", 0);
+                response.add("priceHistory", new JsonArray());
+                response.addProperty("message", "Nessun record trovato nel file " + STORICO_FILE);
+                return response;
+            }
+
+            // Filtra solo i trade eseguiti del mese richiesto
+            Map<String, List<JsonObject>> tradesByDay = new HashMap<>();
+            int recordsProcessed = 0;
+            int tradesFiltered = 0;
+
+            for (int i = 0; i < allRecords.size(); i++) {
+                JsonObject record = allRecords.get(i).getAsJsonObject();
+                recordsProcessed++;
+
+                // Verifica che il record sia un trade con tutti i campi necessari
+                if (!record.has("timestamp") || !record.has("price") || !record.has("size")) {
+                    continue;
+                }
+
+                try {
+                    // Converti timestamp UNIX a LocalDate (GMT come da specifiche)
+                    long timestamp = record.get("timestamp").getAsLong();
+                    LocalDate tradeDate = Instant.ofEpochSecond(timestamp)
+                            .atZone(ZoneId.of("GMT"))
+                            .toLocalDate();
+
+                    // Filtra per mese/anno richiesto
+                    if (tradeDate.getMonthValue() == monthInt && tradeDate.getYear() == yearInt) {
+                        String dayKey = tradeDate.toString(); // Formato YYYY-MM-DD
+
+                        // Crea trade normalizzato per calcolo OHLC
+                        JsonObject tradeForOHLC = new JsonObject();
+                        tradeForOHLC.addProperty("date", dayKey);
+                        tradeForOHLC.addProperty("price", record.get("price").getAsInt());
+                        tradeForOHLC.addProperty("size", record.get("size").getAsInt());
+                        tradeForOHLC.addProperty("timestamp", timestamp);
+
+                        // Mantieni metadati originali se presenti
+                        if (record.has("orderId")) {
+                            tradeForOHLC.addProperty("orderId", record.get("orderId").getAsInt());
+                        }
+                        if (record.has("type")) {
+                            tradeForOHLC.addProperty("type", record.get("type").getAsString());
+                        }
+                        if (record.has("orderType")) {
+                            tradeForOHLC.addProperty("orderType", record.get("orderType").getAsString());
+                        }
+
+                        tradesByDay.computeIfAbsent(dayKey, k -> new ArrayList<>()).add(tradeForOHLC);
+                        tradesFiltered++;
+                    }
+
+                } catch (Exception e) {
+                    System.err.println("[OrderManager] Errore processing record " + i + ": " + e.getMessage());
+                    continue;
+                }
+            }
+
+            System.out.println("[OrderManager] Record processati: " + recordsProcessed +
+                    ", trade filtrati per " + monthYear + ": " + tradesFiltered);
+
+            // Calcola OHLC per ogni giorno
+            JsonArray historyData = new JsonArray();
+
+            List<String> sortedDates = tradesByDay.keySet().stream()
+                    .sorted()
+                    .collect(Collectors.toList());
+
+            for (String date : sortedDates) {
+                List<JsonObject> dayTrades = tradesByDay.get(date);
+
+                if (dayTrades.isEmpty()) continue;
+
+                // Ordina trade del giorno per timestamp per calcolo corretto OHLC
+                dayTrades.sort((t1, t2) ->
+                        Long.compare(t1.get("timestamp").getAsLong(), t2.get("timestamp").getAsLong()));
+
+                // Calcola OHLC (Open, High, Low, Close)
+                int openPrice = dayTrades.get(0).get("price").getAsInt(); // Primo trade del giorno
+                int closePrice = dayTrades.get(dayTrades.size() - 1).get("price").getAsInt(); // Ultimo trade
+
+                int highPrice = dayTrades.stream()
+                        .mapToInt(trade -> trade.get("price").getAsInt())
+                        .max()
+                        .orElse(openPrice);
+
+                int lowPrice = dayTrades.stream()
+                        .mapToInt(trade -> trade.get("price").getAsInt())
+                        .min()
+                        .orElse(openPrice);
+
+                // Calcola volume totale del giorno
+                int totalVolume = dayTrades.stream()
+                        .mapToInt(trade -> trade.get("size").getAsInt())
+                        .sum();
+
+                // Statistiche per tipo di trade
+                long bidTrades = dayTrades.stream()
+                        .filter(trade -> trade.has("type") && "bid".equals(trade.get("type").getAsString()))
+                        .count();
+
+                long askTrades = dayTrades.stream()
+                        .filter(trade -> trade.has("type") && "ask".equals(trade.get("type").getAsString()))
+                        .count();
+
+                // Crea oggetto giornaliero secondo specifiche ALLEGATO 1
+                JsonObject dayData = new JsonObject();
+                dayData.addProperty("date", date);
+                dayData.addProperty("openPrice", openPrice);   // Prezzo di apertura
+                dayData.addProperty("highPrice", highPrice);   // Prezzo massimo
+                dayData.addProperty("lowPrice", lowPrice);     // Prezzo minimo
+                dayData.addProperty("closePrice", closePrice); // Prezzo di chiusura
+                dayData.addProperty("volume", totalVolume);
+                dayData.addProperty("tradesCount", dayTrades.size());
+                dayData.addProperty("bidTrades", (int)bidTrades);
+                dayData.addProperty("askTrades", (int)askTrades);
+
+                historyData.add(dayData);
+            }
+
+            // Crea risposta finale conforme alle specifiche
+            JsonObject response = new JsonObject();
+            response.addProperty("month", monthYear);
+            response.addProperty("totalDays", historyData.size());
+            response.addProperty("totalTrades", tradesFiltered);
+            response.add("priceHistory", historyData);
+
+            System.out.println("[OrderManager] Generato storico prezzi per " + monthYear +
+                    ": " + historyData.size() + " giorni con dati (" + tradesFiltered + " trade)");
+
+            return response;
 
         } catch (Exception e) {
-            System.err.println("[OrderManager] Errore rimozione dall'order book: " + e.getMessage());
-            return false;
+            System.err.println("[OrderManager] Errore getPriceHistory: " + e.getMessage());
+            e.printStackTrace();
+
+            JsonObject error = new JsonObject();
+            error.addProperty("error", "Errore interno durante generazione storico prezzi");
+            error.addProperty("details", e.getMessage());
+            return error;
         }
     }
 
     // === MATCHING ENGINE ===
 
     /**
-     * Esegue l'algoritmo di matching price/time priority
+     * Esegue il matching tra ordini bid e ask secondo algoritmo price/time priority
      * Chiamato dopo ogni inserimento di Limit Order
      */
     private static void performMatching() {
-        // Ottieni best bid e best ask
+        // Ottieni miglior prezzo bid e ask
         Integer bestBidPrice = getBestBidPrice();
         Integer bestAskPrice = getBestAskPrice();
 
-        // Matching possibile solo se bid >= ask (spread crossing)
+        // Matching possibile solo se bid >= ask
         while (bestBidPrice != null && bestAskPrice != null && bestBidPrice >= bestAskPrice) {
+            LinkedList<Order> bidList = bidOrders.get(bestBidPrice);
+            LinkedList<Order> askList = askOrders.get(bestAskPrice);
 
-            LinkedList<Order> bidOrdersAtPrice = bidOrders.get(bestBidPrice);
-            LinkedList<Order> askOrdersAtPrice = askOrders.get(bestAskPrice);
-
-            if (bidOrdersAtPrice.isEmpty() || askOrdersAtPrice.isEmpty()) {
+            if (bidList == null || bidList.isEmpty() || askList == null || askList.isEmpty()) {
                 break;
             }
 
-            // Time priority: primi ordini nella lista (più vecchi)
-            Order bidOrder = bidOrdersAtPrice.getFirst();
-            Order askOrder = askOrdersAtPrice.getFirst();
+            Order bidOrder = bidList.peekFirst();
+            Order askOrder = askList.peekFirst();
 
-            // Esegui trade
-            executeTrade(bidOrder, askOrder, bestAskPrice); // Price improvement per buyer
+            if (bidOrder == null || askOrder == null) {
+                break;
+            }
+
+            // Calcola quantità da scambiare
+            int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
+            int executionPrice = bestAskPrice; // Price priority: prezzo dell'ordine più vecchio
+
+            // Esegui il trade
+            executeTrade(bidOrder, askOrder, tradeSize, executionPrice);
+
+            // Aggiorna remaining size
+            bidOrder.setRemainingSize(bidOrder.getRemainingSize() - tradeSize);
+            askOrder.setRemainingSize(askOrder.getRemainingSize() - tradeSize);
 
             // Rimuovi ordini completamente eseguiti
             if (bidOrder.isFullyExecuted()) {
-                bidOrdersAtPrice.removeFirst();
-                if (bidOrdersAtPrice.isEmpty()) {
+                bidList.removeFirst();
+                if (bidList.isEmpty()) {
                     bidOrders.remove(bestBidPrice);
                 }
             }
 
             if (askOrder.isFullyExecuted()) {
-                askOrdersAtPrice.removeFirst();
-                if (askOrdersAtPrice.isEmpty()) {
+                askList.removeFirst();
+                if (askList.isEmpty()) {
                     askOrders.remove(bestAskPrice);
                 }
             }
 
-            // Ricalcola best prices per prossima iterazione
+            // Aggiorna prezzi migliori per prossima iterazione
             bestBidPrice = getBestBidPrice();
             bestAskPrice = getBestAskPrice();
         }
-
-        // Controlla stop orders dopo ogni matching
-        checkStopOrders();
     }
 
     /**
-     * Esegue un Market Order contro l'order book
+     * Esegue un Market Order contro l'order book esistente
+     * Consuma liquidità dal lato opposto fino a completamento o esaurimento liquidità
+     *
+     * @param marketOrder ordine di mercato da eseguire
      */
     private static void executeMarketOrder(Order marketOrder) {
-        Map<Integer, LinkedList<Order>> oppositeBook = "bid".equals(marketOrder.getType()) ?
-                askOrders : bidOrders;
+        String oppositeType = "bid".equals(marketOrder.getType()) ? "ask" : "bid";
+        Map<Integer, LinkedList<Order>> oppositeBook = "ask".equals(oppositeType) ? askOrders : bidOrders;
 
-        // Ordina prezzi per esecuzione ottimale
-        List<Integer> sortedPrices = new ArrayList<>(oppositeBook.keySet());
-        if ("bid".equals(marketOrder.getType())) {
-            Collections.sort(sortedPrices); // Buy al prezzo più basso possibile
-        } else {
-            Collections.sort(sortedPrices, Collections.reverseOrder()); // Sell al prezzo più alto possibile
-        }
+        int remainingSize = marketOrder.getRemainingSize();
+
+        // Ordina prezzi: crescente per ask (compra al prezzo più basso), decrescente per bid (vendi al prezzo più alto)
+        List<Integer> sortedPrices = oppositeBook.keySet().stream()
+                .sorted("ask".equals(oppositeType) ? Integer::compareTo : (a, b) -> Integer.compare(b, a))
+                .collect(Collectors.toList());
 
         for (Integer price : sortedPrices) {
-            if (marketOrder.isFullyExecuted()) break;
+            if (remainingSize <= 0) break;
 
-            LinkedList<Order> ordersAtPrice = oppositeBook.get(price);
-            Iterator<Order> iterator = ordersAtPrice.iterator();
+            LinkedList<Order> orders = oppositeBook.get(price);
+            if (orders == null || orders.isEmpty()) continue;
 
-            while (iterator.hasNext() && !marketOrder.isFullyExecuted()) {
-                Order limitOrder = iterator.next();
+            Iterator<Order> iterator = orders.iterator();
+            while (iterator.hasNext() && remainingSize > 0) {
+                Order oppositeOrder = iterator.next();
 
+                int tradeSize = Math.min(remainingSize, oppositeOrder.getRemainingSize());
+
+                // Esegui trade al prezzo dell'ordine limite esistente
                 executeTrade(
-                        "bid".equals(marketOrder.getType()) ? marketOrder : limitOrder,
-                        "ask".equals(marketOrder.getType()) ? marketOrder : limitOrder,
+                        "bid".equals(marketOrder.getType()) ? marketOrder : oppositeOrder,
+                        "ask".equals(marketOrder.getType()) ? marketOrder : oppositeOrder,
+                        tradeSize,
                         price
                 );
 
-                if (limitOrder.isFullyExecuted()) {
+                remainingSize -= tradeSize;
+                oppositeOrder.setRemainingSize(oppositeOrder.getRemainingSize() - tradeSize);
+
+                // Rimuovi ordine se completamente eseguito
+                if (oppositeOrder.isFullyExecuted()) {
                     iterator.remove();
                 }
             }
 
-            if (ordersAtPrice.isEmpty()) {
+            // Rimuovi livello di prezzo se vuoto
+            if (orders.isEmpty()) {
                 oppositeBook.remove(price);
             }
         }
 
-        checkStopOrders();
+        // Aggiorna remaining size del market order
+        marketOrder.setRemainingSize(remainingSize);
+
+        if (remainingSize > 0) {
+            System.out.println("[OrderManager] Market Order " + marketOrder.getOrderId() +
+                    " parzialmente eseguito. Rimanenti: " + formatSize(remainingSize) + " BTC");
+        }
     }
 
     /**
      * Esegue un singolo trade tra due ordini
-     * ✅ INTEGRAZIONE MULTICAST: Notifica cambio prezzo per soglie (vecchio ordinamento)
+     * Aggiorna prezzo di mercato, salva nel database e invia notifiche
+     *
+     * @param bidOrder ordine di acquisto
+     * @param askOrder ordine di vendita
+     * @param tradeSize quantità scambiata
+     * @param executionPrice prezzo di esecuzione
      */
-    private static void executeTrade(Order bidOrder, Order askOrder, int executionPrice) {
+    private static void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
-            int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
+            System.out.println("[OrderManager] TRADE ESEGUITO: " +
+                    formatSize(tradeSize) + " BTC @ " + formatPrice(executionPrice) + " USD " +
+                    "(Bid: " + bidOrder.getOrderId() + ", Ask: " + askOrder.getOrderId() + ")");
 
-            bidOrder.setRemainingSize(bidOrder.getRemainingSize() - tradeSize);
-            askOrder.setRemainingSize(askOrder.getRemainingSize() - tradeSize);
-
-            // Salva prezzo precedente per controllo cambiamenti
+            // Aggiorna prezzo di mercato con il prezzo dell'ultimo trade
             int oldPrice = currentMarketPrice;
-
-            // Aggiorna prezzo di mercato corrente
             currentMarketPrice = executionPrice;
 
-            System.out.println("[OrderManager] TRADE ESEGUITO: " + formatSize(tradeSize) + " BTC @ " + formatPrice(executionPrice) + " USD " +
-                    "(" + bidOrder.getUsername() + " buy, " + askOrder.getUsername() + " sell)");
-
-            // ✅ INTEGRAZIONE MULTICAST: Controllo soglie prezzo per notifiche multicast
-            // Solo se il prezzo è effettivamente cambiato (evita notifiche duplicate)
+            // Log cambio prezzo se significativo
             if (oldPrice != currentMarketPrice) {
                 System.out.println("[OrderManager] Prezzo aggiornato: " + formatPrice(oldPrice) + " → " + formatPrice(currentMarketPrice) + " USD");
 
@@ -504,7 +800,10 @@ public class OrderManager {
                 PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
             }
 
-            // Salva trade per storico (TODO: implementare persistenza trade)
+            // Controlla e attiva eventuali Stop Orders
+            checkStopOrders();
+
+            // Salva trade per storico
             saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
 
         } catch (Exception e) {
@@ -514,6 +813,7 @@ public class OrderManager {
 
     /**
      * Controlla e attiva Stop Orders quando condizioni sono soddisfatte
+     * Chiamato ad ogni cambio di prezzo di mercato
      */
     private static void checkStopOrders() {
         List<Order> toActivate = new ArrayList<>();
@@ -543,6 +843,72 @@ public class OrderManager {
         }
     }
 
+    // === HELPER METHODS - ORDER BOOK ===
+
+    /**
+     * Aggiunge un ordine BID all'order book mantenendo ordinamento prezzo/tempo
+     */
+    private static void addToBidBook(Order order) {
+        bidOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
+    }
+
+    /**
+     * Aggiunge un ordine ASK all'order book mantenendo ordinamento prezzo/tempo
+     */
+    private static void addToAskBook(Order order) {
+        askOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
+    }
+
+    /**
+     * Rimuove un ordine dall'order book appropriato
+     */
+    private static boolean removeFromOrderBook(Order order) {
+        Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ? bidOrders : askOrders;
+        LinkedList<Order> orders = book.get(order.getPrice());
+
+        if (orders != null) {
+            boolean removed = orders.remove(order);
+            if (orders.isEmpty()) {
+                book.remove(order.getPrice());
+            }
+
+            // Rimuovi anche da stop orders se applicabile
+            stopOrders.remove(order.getOrderId());
+
+            return removed;
+        }
+
+        return false;
+    }
+
+    // === HELPER METHODS - VALIDAZIONE ===
+
+    private static boolean isValidOrderType(String type) {
+        return "bid".equals(type) || "ask".equals(type);
+    }
+
+    private static boolean isValidStopPrice(String type, int stopPrice) {
+        // Stop Buy: attivato quando prezzo >= stopPrice (protezione short position)
+        // Stop Sell: attivato quando prezzo <= stopPrice (stop loss)
+        if ("bid".equals(type)) {
+            return stopPrice >= currentMarketPrice; // Stop buy sopra mercato
+        } else {
+            return stopPrice <= currentMarketPrice; // Stop sell sotto mercato
+        }
+    }
+
+    private static boolean hasLiquidity(String type, int requiredSize) {
+        // Market buy ha bisogno di ask orders, market sell ha bisogno di bid orders
+        Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(type) ? askOrders : bidOrders;
+
+        int availableLiquidity = bookToCheck.values().stream()
+                .flatMap(List::stream)
+                .mapToInt(Order::getRemainingSize)
+                .sum();
+
+        return availableLiquidity >= requiredSize;
+    }
+
     // === UTILITY METHODS ===
 
     private static Integer getBestBidPrice() {
@@ -561,22 +927,6 @@ public class OrderManager {
         return String.format("%.3f", sizeInMilliths / 1000.0);
     }
 
-    // === PERSISTENCE ===
-
-    private static void initializeOrdersFile() throws IOException {
-        JsonObject rootObject = new JsonObject();
-        rootObject.add("executedTrades", new JsonArray());
-
-        try (FileWriter writer = new FileWriter(ORDERS_FILE)) {
-            gson.toJson(rootObject, writer);
-        }
-    }
-
-    private static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price) {
-        // TODO: Implementare salvataggio trade per storico
-        // Formato JSON da definire per persistenza
-    }
-
     /**
      * Ottiene il prezzo corrente di mercato BTC
      *
@@ -584,5 +934,51 @@ public class OrderManager {
      */
     public static int getCurrentMarketPrice() {
         return currentMarketPrice;
+    }
+
+    // === PERSISTENZA TRADE ===
+
+    /**
+     * Salva un trade eseguito direttamente nel file StoricoOrdini.json
+     * Mantiene lo stesso formato dei tuoi dati esistenti con formattazione JSON
+     *
+     * @param bidOrder ordine di acquisto
+     * @param askOrder ordine di vendita
+     * @param size quantità scambiata
+     * @param price prezzo di esecuzione
+     */
+    private static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price) {
+        try {
+            // Crea il record del trade eseguito nel formato del tuo file
+            JsonObject tradeRecord = new JsonObject();
+
+            // Usa un ID unico per il trade
+            tradeRecord.addProperty("orderId", orderIdGenerator.getAndIncrement());
+
+            // Indica che è un trade eseguito
+            tradeRecord.addProperty("type", "executed");
+            tradeRecord.addProperty("orderType", "completed");
+
+            // Dati principali del trade
+            tradeRecord.addProperty("size", size);
+            tradeRecord.addProperty("price", price);
+            tradeRecord.addProperty("timestamp", System.currentTimeMillis() / 1000); // UNIX timestamp in secondi
+
+            // Metadati aggiuntivi per tracciabilità
+            tradeRecord.addProperty("bidOrderId", bidOrder.getOrderId());
+            tradeRecord.addProperty("askOrderId", askOrder.getOrderId());
+            tradeRecord.addProperty("bidUsername", bidOrder.getUsername());
+            tradeRecord.addProperty("askUsername", askOrder.getUsername());
+
+            // Aggiunge direttamente al file storico con formattazione
+            addTradeToStorico(tradeRecord);
+
+            System.out.println("[OrderManager] Trade salvato in " + STORICO_FILE + ": " +
+                    formatSize(size) + " BTC @ " + formatPrice(price) + " USD (ID: " +
+                    tradeRecord.get("orderId").getAsInt() + ")");
+
+        } catch (Exception e) {
+            System.err.println("[OrderManager] Errore salvataggio trade: " + e.getMessage());
+        }
     }
 }
