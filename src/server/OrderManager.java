@@ -1,70 +1,48 @@
 package server;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 
 import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.stream.Collectors;
 import server.utility.OrderIdGenerator;
 import server.utility.TradePersistence;
-import server.OrderManager.Order;
+import server.utility.PriceCalculator;
+import server.orderbook.OrderBook;
+import server.orders.StopOrderManager;
+import server.orderbook.MatchingEngine;
+import java.util.stream.Collectors;
 
 /**
- * Gestisce il sistema di trading e order book del sistema CROSS
- * Implementa il cuore dell'exchange per Bitcoin secondo le specifiche del progetto
- * - Order Book con algoritmo di matching price/time priority
- * - Gestione ordini: Limit Order, Market Order, Stop Order
- * - Matching engine per esecuzione automatica ordini
- * - Generazione orderId univoci e thread-safe
- * - Persistenza unificata in StoricoOrdini.json con formattazione
- * - Notifiche multicast per soglie prezzo (vecchio ordinamento)
- * - Calcolo OHLC per storico prezzi
+ * Coordinatore principale del sistema di trading CROSS
  *
- * Utilizza strutture thread-safe per gestione concorrente di ordini multipli
- * Size e Price sono espressi in millesimi secondo specifiche:
- * - size 1000 = 1 BTC, price 58000000 = 58.000 USD
+ * Responsabilità dopo refactoring:
+ * - Interfacce pubbliche per inserimento ordini (Limit, Market, Stop)
+ * - Coordinamento tra componenti specializzati
+ * - Gestione stato generale del sistema (prezzo corrente, allOrders)
+ * - Storico prezzi OHLC per analisi mensili
+ * - Esecuzione trade con persistenza e notifiche
+ * - Inizializzazione sistema completo
+ *
+ * Componenti delegati:
+ * - OrderBook: strutture dati bid/ask
+ * - MatchingEngine: algoritmi price/time priority
+ * - StopOrderManager: gestione Stop Orders
+ * - PriceCalculator: formattazione e calcoli OHLC
+ * - TradePersistence: salvataggio trade in JSON
+ * - OrderIdGenerator: generazione ID univoci
+ *
+ * Thread-safe per uso in ambiente multithreaded del server
+ * Size e Price sono espressi in millesimi secondo specifiche progetto
  */
 public class OrderManager {
 
-    // === CONFIGURAZIONE FILE UNIFICATO ===
-
-    // File unico per tutti i trade/ordini storici
-    private static final String STORICO_FILE = "data/StoricoOrdini.json";
-
-    // Lock per sincronizzazione accesso concorrente alle strutture dati
-    private static final ReentrantReadWriteLock ordersLock = new ReentrantReadWriteLock();
-
-    // Configurazione Gson per JSON formattato con indentazione (come da specifiche)
-    private static final Gson gson = new GsonBuilder()
-            .setPrettyPrinting()        // Abilita formattazione con spazi
-            .disableHtmlEscaping()      // Non escape caratteri HTML
-            .create();
-
     // === ORDER BOOK STRUCTURES (Thread-Safe) ===
-
-    // Ordini BID (acquisto) ordinati per prezzo decrescente, poi per timestamp
-    // TreeMap mantiene ordinamento automatico, LinkedList per time priority
-    private static final Map<Integer, LinkedList<Order>> bidOrders = new ConcurrentHashMap<>();
-
-    // Ordini ASK (vendita) ordinati per prezzo crescente, poi per timestamp
-    private static final Map<Integer, LinkedList<Order>> askOrders = new ConcurrentHashMap<>();
-
-    // Stop Orders in attesa del trigger (monitorati ad ogni trade)
-    private static final Map<Integer, Order> stopOrders = new ConcurrentHashMap<>();
 
     // Mappa orderId -> Order per lookup veloce e cancellazioni
     private static final Map<Integer, Order> allOrders = new ConcurrentHashMap<>();
@@ -141,7 +119,7 @@ public class OrderManager {
         OrderIdGenerator.initialize();
 
         System.out.println("[OrderManager] Sistema gestione ordini inizializzato");
-        System.out.println("[OrderManager] Prezzo corrente BTC: " + formatPrice(currentMarketPrice) + " USD");
+        System.out.println("[OrderManager] Prezzo corrente BTC: " + PriceCalculator.formatPrice(currentMarketPrice) + " USD");
     }
 
     // === OPERAZIONI ORDINI ===
@@ -170,17 +148,17 @@ public class OrderManager {
             allOrders.put(order.getOrderId(), order);
 
             System.out.println("[OrderManager] Creato Limit Order " + order.getOrderId() +
-                    " - " + username + " " + type + " " + formatSize(size) + " BTC @ " + formatPrice(price) + " USD");
+                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC @ " + PriceCalculator.formatPrice(price) + " USD");
 
             // Inserimento nell'order book appropriato
             if ("bid".equals(type)) {
-                addToBidBook(order);
+                OrderBook.addToBidBook(order);
             } else {
-                addToAskBook(order);
+                OrderBook.addToAskBook(order);
             }
 
             // Tentativo di matching immediato
-            performMatching();
+            MatchingEngine.performLimitOrderMatching(OrderManager::executeTrade);
 
             return order.getOrderId();
 
@@ -208,9 +186,9 @@ public class OrderManager {
             }
 
             // Controllo disponibilità liquidità nel lato opposto dell'order book
-            if (!hasLiquidity(type, size)) {
+            if (!OrderBook.hasLiquidity(type, size)) {
                 System.err.println("[OrderManager] Market Order rifiutato: liquidità insufficiente per " +
-                        formatSize(size) + " BTC " + type);
+                        PriceCalculator.formatSize(size) + " BTC " + type);
                 return -1;
             }
 
@@ -219,10 +197,10 @@ public class OrderManager {
             allOrders.put(marketOrder.getOrderId(), marketOrder);
 
             System.out.println("[OrderManager] Esecuzione Market Order " + marketOrder.getOrderId() +
-                    " - " + username + " " + type + " " + formatSize(size) + " BTC al prezzo di mercato");
+                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC al prezzo di mercato");
 
             // Esecuzione immediata contro order book
-            executeMarketOrder(marketOrder);
+            MatchingEngine.executeMarketOrder(marketOrder, OrderManager::executeTrade);
 
             return marketOrder.getOrderId();
 
@@ -252,19 +230,19 @@ public class OrderManager {
             }
 
             // Validazione logica stop price vs prezzo corrente
-            if (!isValidStopPrice(type, stopPrice)) {
+            if (!StopOrderManager.isValidStopPrice(type, stopPrice, currentMarketPrice)) {
                 System.err.println("[OrderManager] Stop Price non valido per " + type +
-                        ": " + formatPrice(stopPrice) + " (prezzo corrente: " + formatPrice(currentMarketPrice) + ")");
+                        ": " + PriceCalculator.formatPrice(stopPrice) + " (prezzo corrente: " + PriceCalculator.formatPrice(currentMarketPrice) + ")");
                 return -1;
             }
 
-            // Creazione Stop Order
+// Creazione Stop Order
             Order stopOrder = new Order(username, type, "stop", size, 0, stopPrice);
             allOrders.put(stopOrder.getOrderId(), stopOrder);
-            stopOrders.put(stopOrder.getOrderId(), stopOrder);
+            StopOrderManager.addStopOrder(stopOrder);
 
             System.out.println("[OrderManager] Creato Stop Order " + stopOrder.getOrderId() +
-                    " - " + username + " " + type + " " + formatSize(size) + " BTC @ stop " + formatPrice(stopPrice) + " USD");
+                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC @ stop " + PriceCalculator.formatPrice(stopPrice) + " USD");
 
             return stopOrder.getOrderId();
 
@@ -306,7 +284,9 @@ public class OrderManager {
             }
 
             // Rimozione dall'order book appropriato
-            boolean removed = removeFromOrderBook(order);
+            boolean removed = OrderBook.removeOrder(order);
+            StopOrderManager.removeStopOrder(orderId);  // Rimuovi anche da stop orders se presente
+
             if (removed) {
                 allOrders.remove(orderId);
                 System.out.println("[OrderManager] Ordine " + orderId + " cancellato con successo");
@@ -367,7 +347,7 @@ public class OrderManager {
                 response.addProperty("month", monthYear);
                 response.addProperty("totalDays", 0);
                 response.add("priceHistory", new JsonArray());
-                response.addProperty("message", "Nessun record trovato nel file " + STORICO_FILE);
+                response.addProperty("message", "Nessun record trovato nel file ");
                 return response;
             }
 
@@ -434,55 +414,13 @@ public class OrderManager {
                     .sorted()
                     .collect(Collectors.toList());
 
-            for (String date : sortedDates) {
-                List<JsonObject> dayTrades = tradesByDay.get(date);
+            // Calcola OHLC per ogni giorno usando PriceCalculator
+            for (Map.Entry<String, List<JsonObject>> dayEntry : tradesByDay.entrySet()) {
+                String date = dayEntry.getKey();
+                List<JsonObject> dayTrades = dayEntry.getValue();
 
-                if (dayTrades.isEmpty()) continue;
-
-                // Ordina trade del giorno per timestamp per calcolo corretto OHLC
-                dayTrades.sort((t1, t2) ->
-                        Long.compare(t1.get("timestamp").getAsLong(), t2.get("timestamp").getAsLong()));
-
-                // Calcola OHLC (Open, High, Low, Close)
-                int openPrice = dayTrades.get(0).get("price").getAsInt(); // Primo trade del giorno
-                int closePrice = dayTrades.get(dayTrades.size() - 1).get("price").getAsInt(); // Ultimo trade
-
-                int highPrice = dayTrades.stream()
-                        .mapToInt(trade -> trade.get("price").getAsInt())
-                        .max()
-                        .orElse(openPrice);
-
-                int lowPrice = dayTrades.stream()
-                        .mapToInt(trade -> trade.get("price").getAsInt())
-                        .min()
-                        .orElse(openPrice);
-
-                // Calcola volume totale del giorno
-                int totalVolume = dayTrades.stream()
-                        .mapToInt(trade -> trade.get("size").getAsInt())
-                        .sum();
-
-                // Statistiche per tipo di trade
-                long bidTrades = dayTrades.stream()
-                        .filter(trade -> trade.has("type") && "bid".equals(trade.get("type").getAsString()))
-                        .count();
-
-                long askTrades = dayTrades.stream()
-                        .filter(trade -> trade.has("type") && "ask".equals(trade.get("type").getAsString()))
-                        .count();
-
-                // Crea oggetto giornaliero secondo specifiche ALLEGATO 1
-                JsonObject dayData = new JsonObject();
-                dayData.addProperty("date", date);
-                dayData.addProperty("openPrice", openPrice);   // Prezzo di apertura
-                dayData.addProperty("highPrice", highPrice);   // Prezzo massimo
-                dayData.addProperty("lowPrice", lowPrice);     // Prezzo minimo
-                dayData.addProperty("closePrice", closePrice); // Prezzo di chiusura
-                dayData.addProperty("volume", totalVolume);
-                dayData.addProperty("tradesCount", dayTrades.size());
-                dayData.addProperty("bidTrades", (int)bidTrades);
-                dayData.addProperty("askTrades", (int)askTrades);
-
+                // Usa PriceCalculator per calcolare OHLC del giorno
+                JsonObject dayData = PriceCalculator.calculateDayOHLC(dayTrades, date);
                 historyData.add(dayData);
             }
 
@@ -511,123 +449,6 @@ public class OrderManager {
 
     // === MATCHING ENGINE ===
 
-    /**
-     * Esegue il matching tra ordini bid e ask secondo algoritmo price/time priority
-     * Chiamato dopo ogni inserimento di Limit Order
-     */
-    private static void performMatching() {
-        // Ottieni miglior prezzo bid e ask
-        Integer bestBidPrice = getBestBidPrice();
-        Integer bestAskPrice = getBestAskPrice();
-
-        // Matching possibile solo se bid >= ask
-        while (bestBidPrice != null && bestAskPrice != null && bestBidPrice >= bestAskPrice) {
-            LinkedList<Order> bidList = bidOrders.get(bestBidPrice);
-            LinkedList<Order> askList = askOrders.get(bestAskPrice);
-
-            if (bidList == null || bidList.isEmpty() || askList == null || askList.isEmpty()) {
-                break;
-            }
-
-            Order bidOrder = bidList.peekFirst();
-            Order askOrder = askList.peekFirst();
-
-            if (bidOrder == null || askOrder == null) {
-                break;
-            }
-
-            // Calcola quantità da scambiare
-            int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
-            int executionPrice = bestAskPrice; // Price priority: prezzo dell'ordine più vecchio
-
-            // Esegui il trade
-            executeTrade(bidOrder, askOrder, tradeSize, executionPrice);
-
-            // Aggiorna remaining size
-            bidOrder.setRemainingSize(bidOrder.getRemainingSize() - tradeSize);
-            askOrder.setRemainingSize(askOrder.getRemainingSize() - tradeSize);
-
-            // Rimuovi ordini completamente eseguiti
-            if (bidOrder.isFullyExecuted()) {
-                bidList.removeFirst();
-                if (bidList.isEmpty()) {
-                    bidOrders.remove(bestBidPrice);
-                }
-            }
-
-            if (askOrder.isFullyExecuted()) {
-                askList.removeFirst();
-                if (askList.isEmpty()) {
-                    askOrders.remove(bestAskPrice);
-                }
-            }
-
-            // Aggiorna prezzi migliori per prossima iterazione
-            bestBidPrice = getBestBidPrice();
-            bestAskPrice = getBestAskPrice();
-        }
-    }
-
-    /**
-     * Esegue un Market Order contro l'order book esistente
-     * Consuma liquidità dal lato opposto fino a completamento o esaurimento liquidità
-     *
-     * @param marketOrder ordine di mercato da eseguire
-     */
-    private static void executeMarketOrder(Order marketOrder) {
-        String oppositeType = "bid".equals(marketOrder.getType()) ? "ask" : "bid";
-        Map<Integer, LinkedList<Order>> oppositeBook = "ask".equals(oppositeType) ? askOrders : bidOrders;
-
-        int remainingSize = marketOrder.getRemainingSize();
-
-        // Ordina prezzi: crescente per ask (compra al prezzo più basso), decrescente per bid (vendi al prezzo più alto)
-        List<Integer> sortedPrices = oppositeBook.keySet().stream()
-                .sorted("ask".equals(oppositeType) ? Integer::compareTo : (a, b) -> Integer.compare(b, a))
-                .collect(Collectors.toList());
-
-        for (Integer price : sortedPrices) {
-            if (remainingSize <= 0) break;
-
-            LinkedList<Order> orders = oppositeBook.get(price);
-            if (orders == null || orders.isEmpty()) continue;
-
-            Iterator<Order> iterator = orders.iterator();
-            while (iterator.hasNext() && remainingSize > 0) {
-                Order oppositeOrder = iterator.next();
-
-                int tradeSize = Math.min(remainingSize, oppositeOrder.getRemainingSize());
-
-                // Esegui trade al prezzo dell'ordine limite esistente
-                executeTrade(
-                        "bid".equals(marketOrder.getType()) ? marketOrder : oppositeOrder,
-                        "ask".equals(marketOrder.getType()) ? marketOrder : oppositeOrder,
-                        tradeSize,
-                        price
-                );
-
-                remainingSize -= tradeSize;
-                oppositeOrder.setRemainingSize(oppositeOrder.getRemainingSize() - tradeSize);
-
-                // Rimuovi ordine se completamente eseguito
-                if (oppositeOrder.isFullyExecuted()) {
-                    iterator.remove();
-                }
-            }
-
-            // Rimuovi livello di prezzo se vuoto
-            if (orders.isEmpty()) {
-                oppositeBook.remove(price);
-            }
-        }
-
-        // Aggiorna remaining size del market order
-        marketOrder.setRemainingSize(remainingSize);
-
-        if (remainingSize > 0) {
-            System.out.println("[OrderManager] Market Order " + marketOrder.getOrderId() +
-                    " parzialmente eseguito. Rimanenti: " + formatSize(remainingSize) + " BTC");
-        }
-    }
 
     /**
      * Esegue un singolo trade tra due ordini
@@ -641,7 +462,7 @@ public class OrderManager {
     private static void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
             System.out.println("[OrderManager] TRADE ESEGUITO: " +
-                    formatSize(tradeSize) + " BTC @ " + formatPrice(executionPrice) + " USD " +
+                    PriceCalculator.formatSize(tradeSize) + " BTC @ " + PriceCalculator.formatPrice(executionPrice) + " USD " +
                     "(Bid: " + bidOrder.getOrderId() + ", Ask: " + askOrder.getOrderId() + ")");
 
             // Aggiorna prezzo di mercato con il prezzo dell'ultimo trade
@@ -650,14 +471,15 @@ public class OrderManager {
 
             // Log cambio prezzo se significativo
             if (oldPrice != currentMarketPrice) {
-                System.out.println("[OrderManager] Prezzo aggiornato: " + formatPrice(oldPrice) + " → " + formatPrice(currentMarketPrice) + " USD");
+                System.out.println("[OrderManager] Prezzo aggiornato: " + PriceCalculator.formatPrice(oldPrice) + " → " + PriceCalculator.formatPrice(currentMarketPrice) + " USD");
 
                 // Chiama servizio multicast per controllo soglie utenti (vecchio ordinamento)
                 PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
             }
 
             // Controlla e attiva eventuali Stop Orders
-            checkStopOrders();
+            StopOrderManager.checkAndActivateStopOrders(currentMarketPrice,
+                    stopOrder -> MatchingEngine.executeMarketOrder(stopOrder, OrderManager::executeTrade));
 
             try {
                 int tradeId = OrderIdGenerator.getNextOrderId();
@@ -671,120 +493,11 @@ public class OrderManager {
         }
     }
 
-    /**
-     * Controlla e attiva Stop Orders quando condizioni sono soddisfatte
-     * Chiamato ad ogni cambio di prezzo di mercato
-     */
-    private static void checkStopOrders() {
-        List<Order> toActivate = new ArrayList<>();
-
-        for (Order stopOrder : stopOrders.values()) {
-            boolean shouldActivate = false;
-
-            if ("bid".equals(stopOrder.getType()) && currentMarketPrice >= stopOrder.getStopPrice()) {
-                shouldActivate = true; // Stop buy trigger
-            } else if ("ask".equals(stopOrder.getType()) && currentMarketPrice <= stopOrder.getStopPrice()) {
-                shouldActivate = true; // Stop sell trigger
-            }
-
-            if (shouldActivate) {
-                toActivate.add(stopOrder);
-            }
-        }
-
-        // Attiva stop orders come market orders
-        for (Order stopOrder : toActivate) {
-            stopOrders.remove(stopOrder.getOrderId());
-            System.out.println("[OrderManager] STOP TRIGGER: Ordine " + stopOrder.getOrderId() +
-                    " attivato come Market Order");
-
-            // Esegui come market order
-            executeMarketOrder(stopOrder);
-        }
-    }
-
-    // === HELPER METHODS - ORDER BOOK ===
-
-    /**
-     * Aggiunge un ordine BID all'order book mantenendo ordinamento prezzo/tempo
-     */
-    private static void addToBidBook(Order order) {
-        bidOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
-    }
-
-    /**
-     * Aggiunge un ordine ASK all'order book mantenendo ordinamento prezzo/tempo
-     */
-    private static void addToAskBook(Order order) {
-        askOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
-    }
-
-    /**
-     * Rimuove un ordine dall'order book appropriato
-     */
-    private static boolean removeFromOrderBook(Order order) {
-        Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ? bidOrders : askOrders;
-        LinkedList<Order> orders = book.get(order.getPrice());
-
-        if (orders != null) {
-            boolean removed = orders.remove(order);
-            if (orders.isEmpty()) {
-                book.remove(order.getPrice());
-            }
-
-            // Rimuovi anche da stop orders se applicabile
-            stopOrders.remove(order.getOrderId());
-
-            return removed;
-        }
-
-        return false;
-    }
 
     // === HELPER METHODS - VALIDAZIONE ===
 
     private static boolean isValidOrderType(String type) {
         return "bid".equals(type) || "ask".equals(type);
-    }
-
-    private static boolean isValidStopPrice(String type, int stopPrice) {
-        // Stop Buy: attivato quando prezzo >= stopPrice (protezione short position)
-        // Stop Sell: attivato quando prezzo <= stopPrice (stop loss)
-        if ("bid".equals(type)) {
-            return stopPrice >= currentMarketPrice; // Stop buy sopra mercato
-        } else {
-            return stopPrice <= currentMarketPrice; // Stop sell sotto mercato
-        }
-    }
-
-    private static boolean hasLiquidity(String type, int requiredSize) {
-        // Market buy ha bisogno di ask orders, market sell ha bisogno di bid orders
-        Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(type) ? askOrders : bidOrders;
-
-        int availableLiquidity = bookToCheck.values().stream()
-                .flatMap(List::stream)
-                .mapToInt(Order::getRemainingSize)
-                .sum();
-
-        return availableLiquidity >= requiredSize;
-    }
-
-    // === UTILITY METHODS ===
-
-    public static Integer getBestBidPrice() {
-        return bidOrders.keySet().stream().max(Integer::compareTo).orElse(null);
-    }
-
-    public static Integer getBestAskPrice() {
-        return askOrders.keySet().stream().min(Integer::compareTo).orElse(null);
-    }
-
-    public static String formatPrice(int priceInMilliths) {
-        return String.format("%,.0f", priceInMilliths / 1000.0);
-    }
-
-    public static String formatSize(int sizeInMilliths) {
-        return String.format("%.3f", sizeInMilliths / 1000.0);
     }
 
     /**
@@ -794,6 +507,15 @@ public class OrderManager {
      */
     public static int getCurrentMarketPrice() {
         return currentMarketPrice;
+    }
+
+    /**
+     * Metodo pubblico per eseguire Market Orders (usato da StopOrderManager)
+     *
+     * @param marketOrder ordine da eseguire come market order
+     */
+    public static void executeMarketOrder(Order marketOrder) {
+        MatchingEngine.executeMarketOrder(marketOrder, OrderManager::executeTrade);
     }
 
 }

@@ -19,8 +19,8 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import server.RegistrazioneRMI;
-import static server.OrderManager.formatPrice;
-import static server.OrderManager.formatSize;
+import static server.utility.PriceCalculator.formatPrice;
+import static server.utility.PriceCalculator.formatSize;
 
 /**
  * Classe Main del client CROSS
