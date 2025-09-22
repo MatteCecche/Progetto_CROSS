@@ -1,5 +1,6 @@
 package server;
 
+import server.utility.ResponseBuilder;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -208,19 +209,19 @@ public class ClientHandler implements Runnable {
 
             // Controllo se l'utente è già loggato (usando la mappa condivisa)
             if (isUserAlreadyLoggedIn(username)) {
-                return createErrorResponse(102, "Utente già loggato");
+                return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
             }
 
             // Verifica credenziali tramite UserManager
             if (!UserManager.validateCredentials(username, password)) {
-                return createErrorResponse(101, "Credenziali non valide");
+                return ResponseBuilder.Login.wrongCredentials();
             }
 
             // Login successful - registra nella mappa condivisa
             socketUserMap.put(clientSocket, username);
             System.out.println("[ClientHandler] Login successful: " + username);
 
-            return createSuccessResponse(100, "Login effettuato con successo");
+            return ResponseBuilder.Login.success();
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore durante login: " + e.getMessage());
@@ -249,7 +250,7 @@ public class ClientHandler implements Runnable {
             socketUserMap.remove(clientSocket);
 
             System.out.println("[ClientHandler] Logout successful: " + loggedUsername);
-            return createSuccessResponse(100, "Logout effettuato con successo");
+            return ResponseBuilder.Logout.success();
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore durante logout: " + e.getMessage());
@@ -276,26 +277,26 @@ public class ClientHandler implements Runnable {
 
             // Controllo se l'utente è attualmente loggato (non può cambiare password)
             if (isUserAlreadyLoggedIn(username)) {
-                return createErrorResponse(104, "Impossibile aggiornare password: utente attualmente loggato");
+                return ResponseBuilder.Login.userAlreadyLogged();
             }
 
             // Validazione nuova password
             if (!UserManager.isValidPassword(newPassword)) {
-                return createErrorResponse(101, "Nuova password non valida");
+                return ResponseBuilder.UpdateCredentials.invalidPassword();
             }
 
             // Controllo che nuova password sia diversa dalla vecchia
             if (oldPassword.equals(newPassword)) {
-                return createErrorResponse(103, "La nuova password deve essere diversa da quella attuale");
+                return ResponseBuilder.UpdateCredentials.otherError("La nuova password deve essere diversa da quella attuale");
             }
 
             // Aggiornamento tramite UserManager
             boolean success = UserManager.updatePassword(username, oldPassword, newPassword);
             if (success) {
                 System.out.println("[ClientHandler] Password aggiornata per utente: " + username);
-                return createSuccessResponse(100, "Password aggiornata con successo");
+                return ResponseBuilder.UpdateCredentials.success();
             } else {
-                return createErrorResponse(102, "Username non esistente o password attuale errata");
+                return ResponseBuilder.UpdateCredentials.usernameNotFound();
             }
 
         } catch (Exception e) {
@@ -317,12 +318,12 @@ public class ClientHandler implements Runnable {
             // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
-                return createOrderErrorResponse("Utente non loggato");
+                return ResponseBuilder.Logout.userNotLogged();
             }
 
             // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
@@ -334,17 +335,15 @@ public class ClientHandler implements Runnable {
             int orderId = OrderManager.insertLimitOrder(loggedUsername, type, size, price);
 
             if (orderId == -1) {
-                return createOrderErrorResponse("Errore inserimento Limit Order");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             // Risposta success con orderId
-            JsonObject response = new JsonObject();
-            response.addProperty("orderId", orderId);
-            return response;
+            return ResponseBuilder.TradingOrder.success(orderId);
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore insertLimitOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno server");
+            return ResponseBuilder.TradingOrder.error();
         }
     }
 
@@ -359,12 +358,12 @@ public class ClientHandler implements Runnable {
             // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
-                return createOrderErrorResponse("Utente non loggato");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
@@ -375,7 +374,7 @@ public class ClientHandler implements Runnable {
             int orderId = OrderManager.insertMarketOrder(loggedUsername, type, size);
 
             if (orderId == -1) {
-                return createOrderErrorResponse("Errore inserimento Market Order");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             // Risposta success con orderId
@@ -385,7 +384,7 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore insertMarketOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno server");
+            return ResponseBuilder.TradingOrder.error();
         }
     }
 
@@ -400,12 +399,12 @@ public class ClientHandler implements Runnable {
             // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
-                return createOrderErrorResponse("Utente non loggato");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             // Validazione formato richiesta
             if (!request.has("values")) {
-                return createOrderErrorResponse("Formato richiesta non valido: manca campo values");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
@@ -417,7 +416,7 @@ public class ClientHandler implements Runnable {
             int orderId = OrderManager.insertStopOrder(loggedUsername, type, size, stopPrice);
 
             if (orderId == -1) {
-                return createOrderErrorResponse("Errore inserimento Stop Order");
+                return ResponseBuilder.TradingOrder.error();
             }
 
             // Risposta success con orderId
@@ -427,7 +426,7 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore insertStopOrder: " + e.getMessage());
-            return createOrderErrorResponse("Errore interno server");
+            return ResponseBuilder.TradingOrder.error();
         }
     }
 
@@ -457,9 +456,9 @@ public class ClientHandler implements Runnable {
             int result = OrderManager.cancelOrder(loggedUsername, orderId);
 
             if (result == 100) {
-                return createSuccessResponse(100, "Ordine cancellato con successo");
+                return ResponseBuilder.CancelOrder.success();
             } else {
-                return createErrorResponse(101, "Impossibile cancellare ordine");
+                return ResponseBuilder.CancelOrder.orderError("Impossibile cancellare ordine");
             }
 
         } catch (Exception e) {

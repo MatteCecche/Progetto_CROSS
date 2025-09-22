@@ -19,6 +19,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
+import server.utility.OrderIdGenerator;
+import server.utility.TradePersistence;
+import server.OrderManager.Order;
 
 /**
  * Gestisce il sistema di trading e order book del sistema CROSS
@@ -41,9 +44,6 @@ public class OrderManager {
 
     // File unico per tutti i trade/ordini storici
     private static final String STORICO_FILE = "data/StoricoOrdini.json";
-
-    // Generatore thread-safe per orderId univoci
-    private static final AtomicInteger orderIdGenerator = new AtomicInteger(1);
 
     // Lock per sincronizzazione accesso concorrente alle strutture dati
     private static final ReentrantReadWriteLock ordersLock = new ReentrantReadWriteLock();
@@ -88,7 +88,7 @@ public class OrderManager {
         private int remainingSize;       // Size rimanente (per matching parziali)
 
         public Order(String username, String type, String orderType, int size, int price, int stopPrice) {
-            this.orderId = orderIdGenerator.getAndIncrement();
+            this.orderId = OrderIdGenerator.getNextOrderId();
             this.username = username;
             this.type = type;
             this.orderType = orderType;
@@ -119,95 +119,6 @@ public class OrderManager {
         }
     }
 
-    // === GESTIONE FILE STORICO UNIFICATO ===
-
-    /**
-     * Carica tutti i trade/ordini dal file StoricoOrdini.json unificato
-     * Struttura: { "trades": [ {...}, {...} ] }
-     *
-     * @return JsonArray contenente tutti i record dal file storico
-     * @throws IOException se errori nella lettura del file
-     */
-    private static JsonArray loadStoricoOrdini() throws IOException {
-        ordersLock.readLock().lock();
-        try {
-            File storicoFile = new File(STORICO_FILE);
-
-            if (!storicoFile.exists()) {
-                System.out.println("[OrderManager] File " + STORICO_FILE + " non trovato, creo struttura vuota");
-                return new JsonArray();
-            }
-
-            try (FileReader reader = new FileReader(STORICO_FILE)) {
-                JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-
-                if (root.has("trades") && root.get("trades").isJsonArray()) {
-                    JsonArray trades = root.getAsJsonArray("trades");
-                    return trades;
-                } else {
-                    System.out.println("[OrderManager] Struttura 'trades' non trovata, creo array vuoto");
-                    return new JsonArray();
-                }
-
-            } catch (Exception e) {
-                System.err.println("[OrderManager] Errore parsing " + STORICO_FILE + ": " + e.getMessage());
-                return new JsonArray();
-            }
-
-        } finally {
-            ordersLock.readLock().unlock();
-        }
-    }
-
-    /**
-     * Salva tutti i record nel file StoricoOrdini.json con formattazione pulita
-     * Mantiene la struttura: { "trades": [ ... ] }
-     * Il JSON sarà formattato con indentazione (come da specifiche)
-     *
-     * @param trades JsonArray con tutti i record
-     * @throws IOException se errori nella scrittura
-     */
-    private static void saveStoricoOrdini(JsonArray trades) throws IOException {
-        ordersLock.writeLock().lock();
-        try {
-            // Struttura unificata del file con formattazione
-            JsonObject root = new JsonObject();
-            root.add("trades", trades);
-
-            // Scrivi il file con formattazione pretty
-            try (FileWriter writer = new FileWriter(STORICO_FILE)) {
-                gson.toJson(root, writer);
-                writer.flush(); // Assicura che tutto sia scritto
-            }
-
-            System.out.println("[OrderManager] " + trades.size() + " record salvati in " + STORICO_FILE + " (formattato)");
-
-        } finally {
-            ordersLock.writeLock().unlock();
-        }
-    }
-
-    /**
-     * Aggiunge un nuovo trade/ordine al file storico
-     * Chiamato ogni volta che un trade viene eseguito
-     *
-     * @param tradeData JsonObject contenente i dati del trade
-     */
-    private static void addTradeToStorico(JsonObject tradeData) {
-        try {
-            // Carica tutti i record esistenti
-            JsonArray allRecords = loadStoricoOrdini();
-
-            // Aggiunge il nuovo record
-            allRecords.add(tradeData);
-
-            // Salva tutto con formattazione
-            saveStoricoOrdini(allRecords);
-
-        } catch (Exception e) {
-            System.err.println("[OrderManager] Errore aggiunta trade a storico: " + e.getMessage());
-        }
-    }
 
     // === INIZIALIZZAZIONE SISTEMA ===
 
@@ -223,69 +134,13 @@ public class OrderManager {
             System.out.println("[OrderManager] Creata directory data/");
         }
 
-        // Verifica/crea solo il file StoricoOrdini.json
-        File storicoFile = new File(STORICO_FILE);
-        if (storicoFile.exists()) {
-            System.out.println("[OrderManager] ✅ Trovato file storico: " + STORICO_FILE);
-            System.out.println("[OrderManager] Dimensione file: " + storicoFile.length() + " bytes");
+        // Inizializza persistenza trade
+        TradePersistence.initialize();
 
-            // Test rapido per verificare la struttura
-            try {
-                JsonArray records = loadStoricoOrdini();
-                System.out.println("[OrderManager] ✅ File valido con " + records.size() + " record");
+        // Inizializza il generatore di orderID
+        OrderIdGenerator.initialize();
 
-                if (records.size() > 0) {
-                    // Mostra range temporale dei dati
-                    JsonObject firstRecord = records.get(0).getAsJsonObject();
-                    JsonObject lastRecord = records.get(records.size() - 1).getAsJsonObject();
-
-                    if (firstRecord.has("timestamp") && lastRecord.has("timestamp")) {
-                        long firstTimestamp = firstRecord.get("timestamp").getAsLong();
-                        long lastTimestamp = lastRecord.get("timestamp").getAsLong();
-
-                        LocalDate firstDate = Instant.ofEpochSecond(firstTimestamp)
-                                .atZone(ZoneId.of("GMT")).toLocalDate();
-                        LocalDate lastDate = Instant.ofEpochSecond(lastTimestamp)
-                                .atZone(ZoneId.of("GMT")).toLocalDate();
-
-                        System.out.println("[OrderManager] Range date: " + firstDate + " → " + lastDate);
-                    }
-                }
-            } catch (Exception e) {
-                System.err.println("[OrderManager] ⚠️ Errore lettura storico: " + e.getMessage());
-            }
-        } else {
-            // Crea file vuoto con struttura corretta
-            System.out.println("[OrderManager] Creazione nuovo file " + STORICO_FILE);
-            JsonArray emptyTrades = new JsonArray();
-            saveStoricoOrdini(emptyTrades);
-            System.out.println("[OrderManager] ✅ File storico creato");
-        }
-
-        // Inizializza il generatore di orderID dal file esistente
-        try {
-            JsonArray records = loadStoricoOrdini();
-            int maxOrderId = 0;
-
-            for (int i = 0; i < records.size(); i++) {
-                JsonObject record = records.get(i).getAsJsonObject();
-                if (record.has("orderId")) {
-                    int orderId = record.get("orderId").getAsInt();
-                    if (orderId > maxOrderId) {
-                        maxOrderId = orderId;
-                    }
-                }
-            }
-
-            // Imposta il prossimo ID disponibile
-            orderIdGenerator.set(maxOrderId + 1);
-            System.out.println("[OrderManager] Prossimo orderID: " + orderIdGenerator.get());
-
-        } catch (Exception e) {
-            System.err.println("[OrderManager] Errore inizializzazione orderID generator: " + e.getMessage());
-        }
-
-        System.out.println("[OrderManager] Sistema gestione ordini inizializzato (solo StoricoOrdini.json)");
+        System.out.println("[OrderManager] Sistema gestione ordini inizializzato");
         System.out.println("[OrderManager] Prezzo corrente BTC: " + formatPrice(currentMarketPrice) + " USD");
     }
 
@@ -485,6 +340,7 @@ public class OrderManager {
                 return error;
             }
 
+            JsonArray allRecords = TradePersistence.loadTrades();
             String month = monthYear.substring(0, 2);
             String year = monthYear.substring(2, 6);
 
@@ -503,8 +359,8 @@ public class OrderManager {
                 return error;
             }
 
-            // Carica tutti i record dal file storico unificato
-            JsonArray allRecords = loadStoricoOrdini();
+            // Carica tutti i record dal file
+            JsonArray records = TradePersistence.loadTrades();
 
             if (allRecords.size() == 0) {
                 JsonObject response = new JsonObject();
@@ -803,8 +659,12 @@ public class OrderManager {
             // Controlla e attiva eventuali Stop Orders
             checkStopOrders();
 
-            // Salva trade per storico
-            saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
+            try {
+                int tradeId = OrderIdGenerator.getNextOrderId();
+                TradePersistence.saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice, tradeId);
+            } catch (IOException e) {
+                System.err.println("[OrderManager] Errore salvataggio trade: " + e.getMessage());
+            }
 
         } catch (Exception e) {
             System.err.println("[OrderManager] Errore esecuzione trade: " + e.getMessage());
@@ -936,49 +796,4 @@ public class OrderManager {
         return currentMarketPrice;
     }
 
-    // === PERSISTENZA TRADE ===
-
-    /**
-     * Salva un trade eseguito direttamente nel file StoricoOrdini.json
-     * Mantiene lo stesso formato dei tuoi dati esistenti con formattazione JSON
-     *
-     * @param bidOrder ordine di acquisto
-     * @param askOrder ordine di vendita
-     * @param size quantità scambiata
-     * @param price prezzo di esecuzione
-     */
-    private static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price) {
-        try {
-            // Crea il record del trade eseguito nel formato del tuo file
-            JsonObject tradeRecord = new JsonObject();
-
-            // Usa un ID unico per il trade
-            tradeRecord.addProperty("orderId", orderIdGenerator.getAndIncrement());
-
-            // Indica che è un trade eseguito
-            tradeRecord.addProperty("type", "executed");
-            tradeRecord.addProperty("orderType", "completed");
-
-            // Dati principali del trade
-            tradeRecord.addProperty("size", size);
-            tradeRecord.addProperty("price", price);
-            tradeRecord.addProperty("timestamp", System.currentTimeMillis() / 1000); // UNIX timestamp in secondi
-
-            // Metadati aggiuntivi per tracciabilità
-            tradeRecord.addProperty("bidOrderId", bidOrder.getOrderId());
-            tradeRecord.addProperty("askOrderId", askOrder.getOrderId());
-            tradeRecord.addProperty("bidUsername", bidOrder.getUsername());
-            tradeRecord.addProperty("askUsername", askOrder.getUsername());
-
-            // Aggiunge direttamente al file storico con formattazione
-            addTradeToStorico(tradeRecord);
-
-            System.out.println("[OrderManager] Trade salvato in " + STORICO_FILE + ": " +
-                    formatSize(size) + " BTC @ " + formatPrice(price) + " USD (ID: " +
-                    tradeRecord.get("orderId").getAsInt() + ")");
-
-        } catch (Exception e) {
-            System.err.println("[OrderManager] Errore salvataggio trade: " + e.getMessage());
-        }
-    }
 }
