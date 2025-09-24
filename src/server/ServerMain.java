@@ -20,10 +20,10 @@ import java.util.concurrent.TimeUnit;
  * Implementa un server multithreaded che gestisce:
  * - Registrazioni via RMI
  * - Login e operazioni via TCP
- * - Thread pool per gestire client multipli
+ * - Thread pool per gestire client
  * - Servizio multicast per notifiche prezzo
- * - Thread per ascoltare comandi da terminale ("esci")
- * - Mappa socket-utente per gestione ottimizzata del login/logout
+ * - Thread per ascoltare il comando "esci" da terminale
+ * - Mappa socket-utente
  */
 
 
