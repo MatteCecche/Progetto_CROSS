@@ -14,17 +14,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+
 /**
  * Classe Main del server CROSS
  * Implementa un server multithreaded che gestisce:
  * - Registrazioni via RMI
  * - Login e operazioni via TCP
  * - Thread pool per gestire client multipli
- * - Servizio multicast per notifiche prezzo (vecchio ordinamento)
+ * - Servizio multicast per notifiche prezzo
  * - Thread per ascoltare comandi da terminale ("esci")
- * - Configurazione centralizzata tramite file properties
  * - Mappa socket-utente per gestione ottimizzata del login/logout
  */
+
+
 public class ServerMain {
 
     // Flag volatile per terminazione thread-safe del server
@@ -39,20 +41,13 @@ public class ServerMain {
     // Mappa thread-safe che associa socket dell'utente al suo username
     private static final ConcurrentHashMap<Socket, String> socketUserMap = new ConcurrentHashMap<>();
 
-    /**
-     * Main del server CROSS
-     * 1. Caricamento configurazione da file properties
-     * 2. Parsing e validazione parametri
-     * 3. Avvio server RMI per registrazioni
-     * 4. Avvio servizio multicast per notifiche prezzo
-     * 5. Avvio server TCP per operazioni client
-     * 6. Gestione shutdown ordinato in caso di errori
-     *
-     * @param args argomenti da linea di comando
-     */
+    // Thread separato per ascoltare comandi da terminale
+    private static Thread terminalListener;
+
+
     public static void main(String[] args) {
 
-        System.out.println("[Server] ==== Avvio Server CROSS ====");
+        System.out.println("[Server] ===== Avvio Server CROSS =====");
 
         // Caricamento delle configurazioni da file properties
         Properties config;
@@ -71,37 +66,26 @@ public class ServerMain {
         String multicastAddress;
         int multicastPort;
 
+        // Lettura parametri
         try {
             tcpPort = parseRequiredIntProperty(config, "TCP.port");
             rmiPort = parseRequiredIntProperty(config, "RMI.port");
             socketTimeout = parseRequiredIntProperty(config, "socket.timeout");
-
-            // Lettura parametri multicast da properties (vecchio ordinamento)
             multicastAddress = parseRequiredStringProperty(config, "multicast.address");
             multicastPort = parseRequiredIntProperty(config, "multicast.port");
-
         } catch (IllegalArgumentException e) {
             System.err.println("[Server] Errore nel parsing dei parametri: " + e.getMessage());
             System.exit(1);
             return;
         }
 
-        // Stampa configurazione caricata con successo per debug
-        System.out.println("[Server] Configurazione caricata correttamente:");
-        System.out.println("[Server] - TCP Port: " + tcpPort);
-        System.out.println("[Server] - RMI Port: " + rmiPort);
-        System.out.println("[Server] - Socket Timeout: " + socketTimeout + "ms");
-        System.out.println("[Server] - Multicast Address: " + multicastAddress);
-        System.out.println("[Server] - Multicast Port: " + multicastPort);
-
         // Avvio server RMI per registrazioni
         try {
             startRMIServer(rmiPort);
             OrderManager.initialize();
 
-            // Inizializzazione servizio multicast per notifiche prezzo (vecchio ordinamento)
+            // Inizializzazione servizio multicast per notifiche prezzo
             PriceNotificationService.initialize(multicastAddress, multicastPort);
-
         } catch (Exception e) {
             System.err.println("[Server] Errore avvio servizi: " + e.getMessage());
             e.printStackTrace();
@@ -111,36 +95,24 @@ public class ServerMain {
         // Avvio server TCP principale per tutte le operazioni client
         try {
             startTCPServer(tcpPort, socketTimeout);
-        } catch (IOException e) {
-            System.err.println("[Server] Errore avvio connessione TCP: " + e.getMessage());
-            System.exit(1);
         } catch (Exception e) {
-            System.err.println("[Server] ERRORE IMPREVISTO durante avvio connessione TCP: " + e.getMessage());
-            e.printStackTrace();
+            System.err.println("Errore avvio server TCP: " + e.getMessage());
             System.exit(1);
         } finally {
             shutdownServer();
         }
     }
 
-    /**
-     * Carica la configurazione dal file server.properties
-     *
-     * @return Properties oggetto con la configurazione caricata e validata
-     * @throws IOException se il file di configurazione non esiste o è illeggibile
-     */
+
+    // Carica la configurazione dal file server.properties
     private static Properties loadConfiguration() throws IOException {
         Properties prop = new Properties();
-
         File configFile = new File("src/server/server.properties");
-
         if (!configFile.exists()) {
             throw new IOException("File di configurazione non trovato: " + configFile.getPath());
         }
-
         try (FileReader reader = new FileReader(configFile)) {
             prop.load(reader);
-            System.out.println("[Server] Configurazione caricata da: " + configFile.getPath());
         } catch (IOException e) {
             System.err.println("[Server] Errore caricamento configurazione: " + e.getMessage());
             throw e;
@@ -149,21 +121,12 @@ public class ServerMain {
         return prop;
     }
 
-    /**
-     * Effettua il parsing di un numero intero da Properties
-     *
-     * @param props oggetto Properties contenente la configurazione
-     * @param key chiave da cercare nel file properties
-     * @return valore parsato come intero
-     * @throws IllegalArgumentException se la property manca o è invalida
-     */
+    //Effettua il parsing di un numero intero da Properties
     private static int parseRequiredIntProperty(Properties props, String key) {
         String value = props.getProperty(key);
-
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException("Parametro mancante nel file server.properties: " + key);
         }
-
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
@@ -171,17 +134,9 @@ public class ServerMain {
         }
     }
 
-    /**
-     * Effettua il parsing di una stringa da Properties
-     *
-     * @param props oggetto Properties contenente la configurazione
-     * @param key chiave da cercare nel file properties
-     * @return valore della property con trim applicato
-     * @throws IllegalArgumentException se la property manca o è vuota
-     */
+    //Effettua il parsing di una stringa da Properties
     private static String parseRequiredStringProperty(Properties props, String key) {
         String value = props.getProperty(key);
-
         if (value == null || value.trim().isEmpty()) {
             throw new IllegalArgumentException("Parametro mancante nel file server.properties: " + key);
         }
@@ -189,59 +144,22 @@ public class ServerMain {
         return value.trim();
     }
 
-    /**
-     * Avvia il server RMI per gestire le registrazioni utenti
-     * Segue il pattern delle slide RMI per setup corretto con UnicastRemoteObject
-     *
-     * IMPORTANTE: Dal momento che RegistrazioneRMIImpl estende già UnicastRemoteObject,
-     * NON è necessario chiamare exportObject() - l'export avviene automaticamente
-     * nel costruttore di UnicastRemoteObject
-     *
-     * @param rmiPort porta su cui avviare il registry RMI
-     * @throws Exception se errori durante setup RMI (registry, binding)
-     */
+    //Avvia il server RMI per gestire le registrazioni utenti
     private static void startRMIServer(int rmiPort) throws Exception {
-
-        // Step 1: Istanzia l'oggetto remoto (secondo slide RMI)
-        // Il costruttore di RegistrazioneRMIImpl chiama super() di UnicastRemoteObject
-        // che esporta automaticamente l'oggetto creando lo stub
         RegistrazioneRMIImpl rmiImpl = new RegistrazioneRMIImpl();
-
-        // Step 2: Crea il registry sulla porta specificata (secondo slide)
         LocateRegistry.createRegistry(rmiPort);
-
-        // Step 3: Ottiene riferimento al registry appena creato
         Registry registry = LocateRegistry.getRegistry(rmiPort);
-
-        // Step 4: Registra il servizio nel registry con nome "server-rmi"
-        // Non serve cast perché RegistrazioneRMIImpl implementa già RegistrazioneRMI
-        // e UnicastRemoteObject gestisce automaticamente lo stub
         registry.rebind("server-rmi", rmiImpl);
-
-        System.out.println("[Server] Server RMI attivo sulla porta " + rmiPort);
-        System.out.println("[Server] Servizio registrazione disponibile come 'server-rmi'");
     }
 
-    /**
-     * Avvia il server TCP principale per gestire connessioni client
-     * Coordina thread pool, listener terminale e loop di accettazione connessioni
-     * Ogni client viene gestito in un thread separato dal pool
-     *
-     * @param tcpPort porta TCP su cui mettersi in ascolto
-     * @param socketTimeout timeout per i socket client in millisecondi
-     * @throws IOException se errori nella creazione ServerSocket
-     */
+    //Avvia il server TCP principale per gestire connessioni client
     private static void startTCPServer(int tcpPort, int socketTimeout) throws IOException {
-
         pool = Executors.newCachedThreadPool();
-        System.out.println("[Server] Thread pool inizializzato (CachedThreadPool)");
-
         serverSocket = new ServerSocket(tcpPort);
-        System.out.println("[Server] Server TCP in ascolto sulla porta " + tcpPort);
+        serverSocket.setSoTimeout(1000); // 1 secondo di timeout
 
         // Avvia thread separato per ascolto comandi da terminale
-        Thread terminalListener = new Thread(new Runnable() {
-            @Override
+        terminalListener = new Thread(new Runnable() {
             public void run() {
                 listenForTerminalCommands();
             }
@@ -251,19 +169,16 @@ public class ServerMain {
         // Loop principale: accetta connessioni client
         while (running) {
             try {
-
                 Socket clientSocket = serverSocket.accept();
                 clientSocket.setSoTimeout(socketTimeout);
-
                 System.out.println("[Server] Nuova connessione da: " +
                         clientSocket.getRemoteSocketAddress());
 
                 // Crea handler per questo client e lo sottomette al thread pool
-                // Ogni client viene gestito in un thread separato
-                // Passa la mappa condivisa per gestione login/logout
                 ClientHandler clientHandler = new ClientHandler(clientSocket, socketUserMap);
                 pool.submit(clientHandler);
-
+            } catch (java.net.SocketTimeoutException e) {
+                continue;
             } catch (IOException e) {
                 if (running) {
                     System.err.println("[Server] Errore accettazione connessione client: " + e.getMessage());
@@ -272,21 +187,27 @@ public class ServerMain {
         }
     }
 
-    /**
-     * Thread separato per ascoltare comandi da terminale server
-     * Permette di terminare il server digitando "esci" nel terminale
-     */
+
+    //Thread separato per ascoltare il comando "esci" da terminale
     private static void listenForTerminalCommands() {
         Scanner terminalScanner = new Scanner(System.in);
         System.out.println("[Server] Digitare 'esci' per terminare il server");
-
         while (running) {
             try {
                 String command = terminalScanner.nextLine().trim().toLowerCase();
                 if ("esci".equals(command)) {
                     System.out.println("[Server] Comando di terminazione ricevuto");
                     running = false;
+                    try {
+                        if (serverSocket != null && !serverSocket.isClosed()) {
+                            serverSocket.close();
+                        }
+                    } catch (IOException e) {
+                        System.err.println("[Server] Errore chiusura: " + e.getMessage());
+                    }
                     break;
+                } else if (!command.isEmpty()) {
+                    System.out.println("[Server] Comando non riconosciuto. Digitare 'esci' per terminare il server");
                 }
             } catch (Exception e) {
                 if (running) {
@@ -299,17 +220,21 @@ public class ServerMain {
         System.out.println("[Server] Listener comandi terminale terminato");
     }
 
-    /**
-     * Esegue lo shutdown ordinato del server
-     * Chiude tutti i socket, ferma thread pool, libera risorse
-     */
+    //Esegue lo shutdown ordinato del server
     private static void shutdownServer() {
-        System.out.println("[Server] Iniziando shutdown del server...");
-
         try {
             running = false;
 
-            // Chiusura thread pool
+            // Attende terminazione del thread listener terminale
+            if (terminalListener != null && terminalListener.isAlive()) {
+                try {
+                    // Aspetta terminazione thread terminale
+                    terminalListener.join();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.out.println("[Server] Interruzione durante join del thread terminale");
+                }
+            }
             if (pool != null) {
                 pool.shutdown();
                 try {
@@ -321,21 +246,13 @@ public class ServerMain {
                     Thread.currentThread().interrupt();
                 }
             }
-
-            // Chiusura server socket
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
             }
-
-            // Shutdown servizio multicast
             PriceNotificationService.shutdown();
-
-            // Cleanup mappa utenti loggati
             socketUserMap.clear();
-
             System.out.println("[Server] Shutdown completato");
             System.exit(0);
-
         } catch (Exception e) {
             System.err.println("[Server] Errore durante shutdown: " + e.getMessage());
         }
