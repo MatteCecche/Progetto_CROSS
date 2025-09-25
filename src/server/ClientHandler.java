@@ -2,7 +2,6 @@ package server;
 
 import server.utility.ResponseBuilder;
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
@@ -22,9 +21,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * - Gestione del protocollo di comunicazione JSON con il client
  * - Implementazione delle operazioni di autenticazione e gestione account
  * - Sistema di trading completo con OrderManager integration
- * - Registrazione notifiche prezzo multicast (vecchio ordinamento)
+ * - Registrazione notifiche prezzo multicast
  * - Sincronizzazione con la mappa globale socket-utente per stato login
- * - Gestione robusta degli errori e cleanup delle risorse
  *
  * Utilizza UserManager per tutte le operazioni sui dati utenti,
  * garantendo centralizzazione e consistenza della logica di persistenza.
@@ -44,40 +42,19 @@ public class ClientHandler implements Runnable {
     private Gson gson;
 
     // Riferimento alla mappa condivisa socket -> username
-    // Utilizzata per tracciare quali utenti sono attualmente loggati
     private ConcurrentHashMap<Socket, String> socketUserMap;
 
-    /**
-     * Costruttore - inizializza handler per un client specifico
-     * Configura tutte le risorse necessarie per la gestione del client
-     * La mappa degli utenti loggati è condivisa tra tutti i ClientHandler
-     *
-     * @param clientSocket socket della connessione TCP stabilita con il client
-     * @param socketUserMap mappa condivisa thread-safe socket -> username per tracking login
-     */
+    //Configura tutte le risorse necessarie per la gestione del client
     public ClientHandler(Socket clientSocket, ConcurrentHashMap<Socket, String> socketUserMap) {
         this.clientSocket = clientSocket;
         this.gson = new Gson();
         this.socketUserMap = socketUserMap;
     }
 
-    /**
-     * Main del thread - gestisce le comunicazioni con il client
-     * 1. Setup degli stream di comunicazione
-     * 2. Loop di gestione messaggi JSON
-     * 3. Gestione timeout e disconnessioni
-     * 4. Cleanup garantito delle risorse
-     *
-     * Questo metodo viene eseguito dal thread pool del server
-     */
-    @Override
     public void run() {
         try {
             // Inizializza gli stream di comunicazione
             setupStreams();
-
-            System.out.println("[ClientHandler] Client connesso: " +
-                    clientSocket.getRemoteSocketAddress());
 
             // Loop principale di gestione messaggi JSON
             handleClientMessages();
@@ -89,28 +66,17 @@ public class ClientHandler implements Runnable {
             System.err.println("[ClientHandler] Errore comunicazione client: " +
                     e.getMessage());
         } finally {
-            // Cleanup garantito delle risorse anche in caso di eccezioni
             cleanup();
         }
     }
 
-    /**
-     * Inizializza gli stream di input/output per la comunicazione JSON
-     * Configura BufferedReader per lettura efficiente delle righe JSON
-     * e PrintWriter con autoflush per invio immediato delle risposte
-     *
-     * @throws IOException se errori nella creazione degli stream dal socket
-     */
+    //Inizializza gli stream di input/output per la comunicazione JSON
     private void setupStreams() throws IOException {
         in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
         out = new PrintWriter(clientSocket.getOutputStream(), true);
     }
 
-    /**
-     * Loop principale che gestisce i messaggi JSON dal client
-     *
-     * @throws IOException se errori nella comunicazione con il client
-     */
+    //Loop principale che gestisce i messaggi JSON dal client
     private void handleClientMessages() throws IOException {
         String messageJson;
 
@@ -125,11 +91,20 @@ public class ClientHandler implements Runnable {
                 }
 
                 String operation = request.get("operation").getAsString();
-                System.out.println("[ClientHandler] Operazione ricevuta: " + operation +
-                        " da " + getClientInfo());
+
+                // Salva username per il caso logout
+                String userBeforeOperation = getClientInfo();
 
                 // Dispatch dell'operazione al handler specifico
                 JsonObject response = processOperation(operation, request);
+
+                if ("logout".equals(operation)) {
+                    System.out.println("[ClientHandler] Operazione " + operation +
+                            " processata per " + userBeforeOperation);
+                } else {
+                    System.out.println("[ClientHandler] Operazione " + operation +
+                            " processata per " + getClientInfo());
+                }
 
                 // Invio della risposta JSON al client
                 sendResponse(response);
@@ -145,25 +120,15 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Processa le operazioni ricevute dal client
-     *
-     * @param operation tipo di operazione richiesta dal client
-     * @param request oggetto JSON completo della richiesta con parametri
-     * @return JsonObject contenente la risposta da inviare al client
-     */
+    //Processa le operazioni ricevute dal client
     private JsonObject processOperation(String operation, JsonObject request) {
-        // Switch compatibile Java 8 - ESTESO con operazioni trading e multicast
         switch (operation) {
-            // === OPERAZIONI AUTENTICAZIONE ===
             case "login":
                 return handleLogin(request);
             case "logout":
                 return handleLogout(request);
             case "updateCredentials":
                 return handleUpdateCredentials(request);
-
-            // === OPERAZIONI TRADING ===
             case "insertLimitOrder":
                 return handleInsertLimitOrder(request);
             case "insertMarketOrder":
@@ -174,24 +139,14 @@ public class ClientHandler implements Runnable {
                 return handleCancelOrder(request);
             case "getPriceHistory":
                 return handleGetPriceHistory(request);
-
-            // === NOTIFICHE PREZZO MULTICAST (VECCHIO ORDINAMENTO) ===
             case "registerPriceAlert":
                 return handleRegisterPriceAlert(request);
-
             default:
                 return createErrorResponse(103, "Operazione non supportata: " + operation);
         }
     }
 
-    // === OPERAZIONI AUTENTICAZIONE ===
-
-    /**
-     * Gestisce il login del client
-     *
-     * @param request oggetto JSON contenente username e password nel campo "values"
-     * @return JsonObject con codice risposta e messaggio secondo ALLEGATO 1
-     */
+    //Gestisce il login
     private JsonObject handleLogin(JsonObject request) {
         try {
             if (!request.has("values")) {
@@ -207,7 +162,7 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(103, "Parametri login non validi");
             }
 
-            // Controllo se l'utente è già loggato (usando la mappa condivisa)
+            // Controllo se l'utente è già loggato
             if (isUserAlreadyLoggedIn(username)) {
                 return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
             }
@@ -217,7 +172,7 @@ public class ClientHandler implements Runnable {
                 return ResponseBuilder.Login.wrongCredentials();
             }
 
-            // Login successful - registra nella mappa condivisa
+            // Login completato
             socketUserMap.put(clientSocket, username);
             System.out.println("[ClientHandler] Login successful: " + username);
 
@@ -229,12 +184,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce il logout del client
-     *
-     * @param request oggetto JSON della richiesta logout
-     * @return JsonObject con esito dell'operazione
-     */
+    //Gestisce il logout
     private JsonObject handleLogout(JsonObject request) {
         try {
             String loggedUsername = socketUserMap.get(clientSocket);
@@ -243,11 +193,10 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(101, "Nessun utente loggato su questa connessione");
             }
 
+            System.out.println("[ClientHandler] Processando logout per: " + loggedUsername);
+
             // Rimuovi utente dalle notifiche multicast prima del logout
             PriceNotificationService.unregisterUser(loggedUsername);
-
-            // Rimuovi dalla mappa degli utenti loggati
-            socketUserMap.remove(clientSocket);
 
             System.out.println("[ClientHandler] Logout successful: " + loggedUsername);
             return ResponseBuilder.Logout.success();
@@ -258,12 +207,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce l'aggiornamento delle credenziali utente
-     *
-     * @param request oggetto JSON con username, old_password, new_password
-     * @return JsonObject con esito secondo ALLEGATO 1
-     */
+    //Gestisce updateCredentials
     private JsonObject handleUpdateCredentials(JsonObject request) {
         try {
             if (!request.has("values")) {
@@ -275,7 +219,7 @@ public class ClientHandler implements Runnable {
             String oldPassword = getStringValue(values, "old_password");
             String newPassword = getStringValue(values, "new_password");
 
-            // Controllo se l'utente è attualmente loggato (non può cambiare password)
+            // Controllo se l'utente è attualmente loggato
             if (isUserAlreadyLoggedIn(username)) {
                 return ResponseBuilder.Login.userAlreadyLogged();
             }
@@ -305,23 +249,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // === OPERAZIONI TRADING ===
-
-    /**
-     * Gestisce inserimento Limit Order
-     *
-     * @param request JSON con type, size, price secondo ALLEGATO 1
-     * @return JsonObject con orderId o errore
-     */
+    //Gestisce insertLimitOrder
     private JsonObject handleInsertLimitOrder(JsonObject request) {
         try {
-            // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
                 return ResponseBuilder.Logout.userNotLogged();
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
@@ -347,21 +281,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce inserimento Market Order
-     *
-     * @param request JSON con type, size secondo ALLEGATO 1
-     * @return JsonObject con orderId o errore
-     */
+    //Gestisce insertMarketOrder
     private JsonObject handleInsertMarketOrder(JsonObject request) {
         try {
-            // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
                 return ResponseBuilder.TradingOrder.error();
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
@@ -388,21 +314,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce inserimento Stop Order
-     *
-     * @param request JSON con type, size, price (stopPrice) secondo ALLEGATO 1
-     * @return JsonObject con orderId o errore
-     */
+    //Gestisce insertStopOrder
     private JsonObject handleInsertStopOrder(JsonObject request) {
         try {
-            // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
                 return ResponseBuilder.TradingOrder.error();
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
@@ -410,7 +328,7 @@ public class ClientHandler implements Runnable {
             JsonObject values = request.getAsJsonObject("values");
             String type = getStringValue(values, "type");
             int size = getIntValue(values, "size");
-            int stopPrice = getIntValue(values, "price"); // stopPrice secondo ALLEGATO 1
+            int stopPrice = getIntValue(values, "price");
 
             // Chiamata a OrderManager per inserimento
             int orderId = OrderManager.insertStopOrder(loggedUsername, type, size, stopPrice);
@@ -430,12 +348,7 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce cancellazione ordine
-     *
-     * @param request JSON con orderId secondo ALLEGATO 1
-     * @return JsonObject con codici risposta 100/101
-     */
+    //Gestisce cancelOrder
     private JsonObject handleCancelOrder(JsonObject request) {
         try {
             // Controllo autenticazione
@@ -443,8 +356,6 @@ public class ClientHandler implements Runnable {
             if (loggedUsername == null) {
                 return createErrorResponse(101, "Utente non loggato");
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return createErrorResponse(101, "Formato richiesta non valido: manca campo values");
             }
@@ -467,22 +378,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    /**
-     * Gestisce richiesta di storico prezzi per un mese specifico
-     * Formato JSON secondo ALLEGATO 1: month=STRING(MMYYYY)
-     *
-     * @param request JSON con month in formato MMYYYY
-     * @return JsonObject con dati storici OHLC per ogni giorno
-     */
+    //Gestisce getPriceHistory
     private JsonObject handleGetPriceHistory(JsonObject request) {
         try {
-            // Controllo autenticazione
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
                 return createErrorResponse(101, "Utente non loggato");
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
             }
@@ -519,32 +421,13 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // === NOTIFICHE PREZZO MULTICAST (VECCHIO ORDINAMENTO) ===
-
-    /**
-     * Gestisce la registrazione di un utente per notifiche di soglia prezzo
-     * Operazione specifica per studenti vecchio ordinamento
-     *
-     * Formato JSON richiesta:
-     * {
-     *   "operation": "registerPriceAlert",
-     *   "values": {
-     *     "thresholdPrice": NUMBER  // soglia in millesimi USD
-     *   }
-     * }
-     *
-     * @param request oggetto JSON contenente la soglia prezzo desiderata
-     * @return JsonObject con esito operazione
-     */
+    //Gestisce la registrazione di un utente per notifiche di soglia prezzo
     private JsonObject handleRegisterPriceAlert(JsonObject request) {
         try {
-            // Controllo che utente sia loggato
             String loggedUsername = socketUserMap.get(clientSocket);
             if (loggedUsername == null) {
                 return createErrorResponse(101, "Utente non loggato - effettuare login prima di registrare notifiche");
             }
-
-            // Validazione formato richiesta
             if (!request.has("values")) {
                 return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
             }
@@ -566,7 +449,7 @@ public class ClientHandler implements Runnable {
                 return createErrorResponse(103, "thresholdPrice deve essere maggiore di zero");
             }
 
-            // Controllo logico: soglia deve essere maggiore del prezzo corrente
+            // Controllo soglia maggiore del prezzo corrente
             int currentPrice = OrderManager.getCurrentMarketPrice();
             if (thresholdPrice <= currentPrice) {
                 return createErrorResponse(103, "thresholdPrice (" + formatPrice(thresholdPrice) +
@@ -596,81 +479,53 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // === UTILITY METHODS ===
-
-    /**
-     * Controlla se un utente è già loggato (thread-safe)
-     *
-     * @param username nome utente da controllare
-     * @return true se utente già loggato
-     */
+    //Controlla se un utente è già loggato
     private boolean isUserAlreadyLoggedIn(String username) {
         return socketUserMap.containsValue(username);
     }
 
-    /**
-     * Ottiene informazioni sul client per logging
-     *
-     * @return stringa con info client (username@indirizzo)
-     */
+    //Ottiene informazioni sul client
     private String getClientInfo() {
         String username = socketUserMap.get(clientSocket);
         if (username != null) {
-            return username + "@" + clientSocket.getRemoteSocketAddress();
+            return username;
         } else {
-            return "anonymous@" + clientSocket.getRemoteSocketAddress();
+            return "anonymous";
         }
     }
 
-    /**
-     * Estrae valore stringa da JsonObject con gestione errori
-     *
-     * @param json oggetto JSON
-     * @param key chiave da estrarre
-     * @return valore stringa o stringa vuota se errore
-     */
+    //Estrae valore stringa da JsonObject con gestione errori
     private String getStringValue(JsonObject json, String key) {
         try {
-            return json.has(key) ? json.get(key).getAsString() : "";
+            if (json.has(key)) {
+                return json.get(key).getAsString();
+            } else {
+                return "";
+            }
         } catch (Exception e) {
             return "";
         }
     }
 
-    /**
-     * Estrae valore intero da JsonObject con gestione errori
-     *
-     * @param json oggetto JSON
-     * @param key chiave da estrarre
-     * @return valore intero o 0 se errore
-     */
+    //Estrae valore intero da JsonObject con gestione errori
     private int getIntValue(JsonObject json, String key) {
         try {
-            return json.has(key) ? json.get(key).getAsInt() : 0;
+            if (json.has(key)) {
+                return json.get(key).getAsInt();
+            } else {
+                return 0;
+            }
         } catch (Exception e) {
             return 0;
         }
     }
 
-    /**
-     * Formatta prezzo in millesimi per display user-friendly
-     *
-     * @param priceInMillis prezzo in millesimi USD
-     * @return prezzo formattato (es: "58.000")
-     */
+    //Formatta prezzo in millesimi
     private String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    // === RESPONSE HELPERS ===
-
-    /**
-     * Crea risposta di successo standardizzata
-     *
-     * @param code codice di risposta
-     * @param message messaggio descrittivo
-     * @return JsonObject strutturato secondo ALLEGATO 1
-     */
+    //Crea risposta di successo
     private JsonObject createSuccessResponse(int code, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("response", code);
@@ -678,13 +533,7 @@ public class ClientHandler implements Runnable {
         return response;
     }
 
-    /**
-     * Crea risposta di errore standardizzata
-     *
-     * @param code codice di errore
-     * @param message messaggio di errore
-     * @return JsonObject strutturato secondo ALLEGATO 1
-     */
+    //Crea oggetto risposta di errore
     private JsonObject createErrorResponse(int code, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("response", code);
@@ -692,33 +541,19 @@ public class ClientHandler implements Runnable {
         return response;
     }
 
-    /**
-     * Crea risposta di errore per operazioni ordini
-     *
-     * @param errorMessage messaggio di errore
-     * @return JsonObject con orderId = -1 secondo ALLEGATO 1
-     */
+    //Crea risposta di errore per operazioni ordini
     private JsonObject createOrderErrorResponse(String errorMessage) {
         JsonObject response = new JsonObject();
         response.addProperty("orderId", -1);
         return response;
     }
 
-    /**
-     * Invia risposta JSON al client
-     *
-     * @param response oggetto JSON da inviare
-     */
+    //Invia risposta JSON al client
     private void sendResponse(JsonObject response) {
         out.println(response.toString());
     }
 
-    /**
-     * Invia risposta di errore rapida
-     *
-     * @param code codice di errore
-     * @param message messaggio di errore
-     */
+    //Invia risposta di errore rapida
     private void sendErrorResponse(int code, String message) {
         sendResponse(createErrorResponse(code, message));
     }
@@ -730,11 +565,18 @@ public class ClientHandler implements Runnable {
      */
     private void cleanup() {
         try {
-            // Rimuovi utente dalle notifiche multicast se era loggato
+            // Salva il nome utente PRIMA di rimuoverlo dalla mappa
             String loggedUsername = socketUserMap.get(clientSocket);
+            String userInfo;
+            if (loggedUsername != null) {
+                userInfo = loggedUsername;
+            } else {
+                userInfo = "anonymous";
+            }
+
+            // Rimuovi utente dalle notifiche multicast se era loggato
             if (loggedUsername != null) {
                 PriceNotificationService.unregisterUser(loggedUsername);
-                System.out.println("[ClientHandler] Cleanup: rimosso " + loggedUsername + " dalle notifiche multicast");
             }
 
             // Rimuovi dalla mappa degli utenti loggati
@@ -749,7 +591,7 @@ public class ClientHandler implements Runnable {
                 clientSocket.close();
             }
 
-            System.out.println("[ClientHandler] Client disconnesso: " + getClientInfo());
+            System.out.println("[ClientHandler] Client disconnesso: " + userInfo);
 
         } catch (IOException e) {
             System.err.println("[ClientHandler] Errore durante cleanup: " + e.getMessage());

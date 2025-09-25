@@ -33,11 +33,14 @@ public class RegistrazioneRMIImpl extends UnicastRemoteObject implements Registr
     //Registra un nuovo utente
     public int register(String username, String password) throws RemoteException {
         try {
-            // Validazione parametri di input
             int validationResult = UserManager.validateRegistrationParams(username, password);
             if (validationResult != 0) {
-                String errorMsg = validationResult == 101 ?
-                        "password non valida" : "username non valido";
+                String errorMsg;
+                if (validationResult == 101) {
+                    errorMsg = "password non valida";
+                } else {
+                    errorMsg = "username non valido";
+                }
                 System.out.println("[RegistrazioneRMI] Registrazione fallita: " + errorMsg);
                 return validationResult;
             }
