@@ -17,11 +17,6 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - Caricamento e salvataggio utenti da/in file JSON con formattazione
  * - Ricerca e validazione utenti
  * - Creazione nuovi utenti
- * - Sincronizzazione thread-safe per accessi concorrenti
- *
- * Implementa il pattern Utility Class con metodi statici per centralizzare
- * tutta la logica di gestione della persistenza utenti in formato JSON.
- * Utilizza ReentrantReadWriteLock per ottimizzare le operazioni di lettura concorrenti.
  */
 public class UserManager {
 
@@ -37,13 +32,7 @@ public class UserManager {
             .setPrettyPrinting()
             .create();
 
-    /**
-     * Inizializza il sistema di gestione utenti
-     * Configura il filesystem e prepara le strutture dati necessarie per il funzionamento
-     * Crea la directory data e il file utenti se non esistono
-     *
-     * @throws IOException se errori nell'inizializzazione del filesystem o creazione file
-     */
+    //Inizializza il sistema di gestione utenti
     public static void initialize() throws IOException {
         // Crea directory data se non esiste
         File dataDir = new File("data");
@@ -62,15 +51,7 @@ public class UserManager {
         System.out.println("[UserManager] Sistema gestione utenti inizializzato");
     }
 
-    /**
-     * Carica la lista degli utenti dal file JSON
-     * Implementa lettura thread-safe con lock in lettura per permettere accessi concorrenti
-     * Il lock in lettura permette a più thread di leggere contemporaneamente
-     * ma blocca durante le operazioni di scrittura
-     *
-     * @return JsonArray contenente tutti gli utenti registrati nel sistema
-     * @throws IOException se errori critici nella lettura del file che non possono essere risolti
-     */
+    //Carica la lista degli utenti dal file JSON
     public static JsonArray loadUsers() throws IOException {
         usersLock.readLock().lock();
         try {
@@ -104,13 +85,7 @@ public class UserManager {
         }
     }
 
-    /**
-     * Salva la lista degli utenti nel file JSON
-     * Implementa scrittura thread-safe con lock esclusivo per evitare corruzioni
-     *
-     * @param users JsonArray contenente tutti gli utenti da salvare su file
-     * @throws IOException se errori nella scrittura del file o problemi di I/O
-     */
+    //Salva la lista degli utenti nel file JSON
     public static void saveUsers(JsonArray users) throws IOException {
         usersLock.writeLock().lock();
         try {
@@ -125,13 +100,7 @@ public class UserManager {
         }
     }
 
-    /**
-     * Cerca un utente per username nella lista
-     *
-     * @param users lista degli utenti in cui effettuare la ricerca
-     * @param username username da cercare (viene applicato trim automaticamente)
-     * @return JsonObject dell'utente se trovato, null se non trovato o parametri non validi
-     */
+    //Cerca un utente per username nella lista
     public static JsonObject findUser(JsonArray users, String username) {
         if (username == null) return null;
 
@@ -146,25 +115,13 @@ public class UserManager {
         return null;
     }
 
-    /**
-     * Controlla se un username esiste già nel sistema
-     *
-     * @param username username da verificare nel sistema
-     * @return true se l'username esiste già, false altrimenti
-     * @throws IOException se errori nell'accesso al file degli utenti
-     */
+    //Controlla se un username esiste già nel sistema
     public static boolean isUsernameExists(String username) throws IOException {
         JsonArray users = loadUsers();
         return findUser(users, username) != null;
     }
 
-    /**
-     * Crea un nuovo oggetto utente con i parametri specificati
-     *
-     * @param username nome utente scelto (viene applicato trim automaticamente)
-     * @param password password scelta dall'utente (mantenuta come fornita)
-     * @return JsonObject rappresentante il nuovo utente pronto per essere aggiunto alla lista
-     */
+    //Crea un nuovo oggetto utente con i parametri specificati
     public static JsonObject createUser(String username, String password) {
         JsonObject newUser = new JsonObject();
         newUser.addProperty("username", username.trim());
@@ -172,13 +129,7 @@ public class UserManager {
         return newUser;
     }
 
-    /**
-     * Valida i parametri di registrazione
-     *
-     * @param username nome utente da validare
-     * @param password password da validare
-     * @return codice di errore o 0 se i parametri sono validi
-     */
+    //Valida i parametri di registrazione
     public static int validateRegistrationParams(String username, String password) {
         if (username == null || username.trim().isEmpty()) {
             return 103; // username non valido
@@ -191,38 +142,19 @@ public class UserManager {
         return 0; // parametri validi
     }
 
-    /**
-     * Valida i parametri di login con controlli più permissivi rispetto alla registrazione
-     * permette password che contengono solo spazi (tecnicamente valide per login)
-     * ma impedisce password completamente vuote
-     *
-     * @param username nome utente da validare per login
-     * @param password password da validare per login
-     * @return true se i parametri sono sufficienti per tentare il login, false altrimenti
-     */
+    //Valida i parametri di login con controlli più permissivi rispetto alla registrazione
     public static boolean validateLoginParams(String username, String password) {
         return username != null && !username.trim().isEmpty() &&
                 password != null && !password.trim().isEmpty();
     }
 
-    /**
-     * Getter per il lock degli utenti
-     *
-     * @return ReentrantReadWriteLock per sincronizzazione esterna
-     */
+    //Getter per il lock degli utenti
     public static ReentrantReadWriteLock getUsersLock() {
         return usersLock;
     }
 
 
-    /**
-     * Valida le credenziali di un utente confrontando username e password
-     * con i dati memorizzati nel file JSON
-     *
-     * @param username nome utente da verificare
-     * @param password password da verificare
-     * @return true se le credenziali sono corrette, false altrimenti
-     */
+    //Valida le credenziali di un utente confrontando username e password
     public static boolean validateCredentials(String username, String password) {
         try {
             if (username == null || password == null ||
@@ -239,7 +171,7 @@ public class UserManager {
                 return false; // Utente non trovato
             }
 
-            // Confronta password (in chiaro - come da specifiche del progetto)
+            // Confronta password
             String storedPassword = user.get("password").getAsString();
             return password.equals(storedPassword);
 
@@ -249,14 +181,7 @@ public class UserManager {
         }
     }
 
-    /**
-     * Valida una password secondo i criteri del sistema
-     * Le specifiche del progetto non definiscono criteri particolari,
-     * quindi implementiamo validazione base
-     *
-     * @param password password da validare
-     * @return true se la password è valida, false altrimenti
-     */
+    //Valida una password secondo i criteri del sistema
     public static boolean isValidPassword(String password) {
         // Criteri di validazione base secondo le specifiche del progetto
         if (password == null) {
@@ -268,21 +193,10 @@ public class UserManager {
             return false;
         }
 
-        // Le specifiche non richiedono criteri particolari,
-        // quindi accettiamo qualsiasi password non vuota
         return true;
     }
 
-    /**
-     * Aggiorna la password di un utente esistente nel sistema
-     * Verifica che l'utente esista e che la password attuale sia corretta
-     * prima di procedere con l'aggiornamento
-     *
-     * @param username nome utente di cui aggiornare la password
-     * @param oldPassword password attuale (per verifica)
-     * @param newPassword nuova password da impostare
-     * @return true se aggiornamento riuscito, false se errore
-     */
+    //Aggiorna la password di un utente esistente nel sistema
     public static boolean updatePassword(String username, String oldPassword, String newPassword) {
         usersLock.writeLock().lock();
         try {
@@ -328,21 +242,12 @@ public class UserManager {
         }
     }
 
-    /**
-     * Getter per il path del file utenti
-     *
-     * @return String contenente il percorso completo del file utenti
-     */
+    //Getter per il path del file utenti
     public static String getUsersFilePath() {
         return USERS_FILE;
     }
 
-    /**
-     * Inizializza il file degli utenti con una struttura JSON vuota
-     * Crea la struttura base del file
-     *
-     * @throws IOException se errori nella creazione o scrittura del file
-     */
+    //Inizializza il file degli utenti con una struttura JSON vuota
     private static void initializeUsersFile() throws IOException {
         JsonObject rootObject = new JsonObject();
         rootObject.add("users", new JsonArray());

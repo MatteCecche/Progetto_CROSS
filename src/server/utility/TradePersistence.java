@@ -10,18 +10,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-/**
- * Gestisce la persistenza dei trade nel file StoricoOrdini.json
- *
- * Responsabilità:
- * - Lettura/scrittura thread-safe del file storico
- * - Mantenimento formato JSON strutturato {"trades": [...]}
- * - Formattazione pretty-print per leggibilità
- * - Gestione completa del ciclo vita dei dati trade
- *
- * Estratto da OrderManager per principio Single Responsibility
- * Thread-safe per uso in ambiente multithreaded del server
- */
+//Gestisce la persistenza dei trade nel file StoricoOrdini.json
 public class TradePersistence {
 
     // File storico unificato per tutti i trade
@@ -32,16 +21,11 @@ public class TradePersistence {
 
     // Configurazione Gson per JSON formattato
     private static final Gson gson = new GsonBuilder()
-            .setPrettyPrinting()        // Formattazione con indentazione
-            .disableHtmlEscaping()      // Non escape caratteri HTML
+            .setPrettyPrinting()
+            .disableHtmlEscaping()
             .create();
 
-    /**
-     * Inizializza il sistema di persistenza
-     * Crea directory e file se non esistenti
-     *
-     * @throws IOException se errori nella creazione della struttura
-     */
+    //Inizializza il sistema di persistenza
     public static void initialize() throws IOException {
         // Crea directory data se non esiste
         File dataDir = new File("data");
@@ -54,37 +38,26 @@ public class TradePersistence {
         File storicoFile = new File(STORICO_FILE);
         if (!storicoFile.exists()) {
             // Crea file vuoto con struttura corretta
-            System.out.println("[TradePersistence] Creazione file " + STORICO_FILE);
             JsonArray emptyTrades = new JsonArray();
             saveTrades(emptyTrades);
-            System.out.println("[TradePersistence] ✅ File storico inizializzato");
         } else {
-            System.out.println("[TradePersistence] ✅ File storico esistente: " + STORICO_FILE);
-
             // Verifica integrità del file
             try {
                 JsonArray trades = loadTrades();
-                System.out.println("[TradePersistence] ✅ File valido con " + trades.size() + " record");
             } catch (Exception e) {
-                System.err.println("[TradePersistence] ⚠️ Errore verifica file: " + e.getMessage());
+                System.err.println("[TradePersistence] Errore verifica file: " + e.getMessage());
             }
         }
     }
 
-    /**
-     * Carica tutti i trade dal file storico
-     * Thread-safe con lock di lettura per permettere accessi concorrenti
-     *
-     * @return JsonArray con tutti i trade, mai null
-     * @throws IOException se errori critici nella lettura
-     */
+    //Carica tutti i trade dal file storico
     public static JsonArray loadTrades() throws IOException {
         ordersLock.readLock().lock();
         try {
             File storicoFile = new File(STORICO_FILE);
 
             if (!storicoFile.exists()) {
-                System.out.println("[TradePersistence] File non trovato, ritorno array vuoto");
+                System.out.println("[TradePersistence] File non trovato");
                 return new JsonArray();
             }
 
@@ -94,7 +67,7 @@ public class TradePersistence {
                 if (root.has("trades") && root.get("trades").isJsonArray()) {
                     return root.getAsJsonArray("trades");
                 } else {
-                    System.out.println("[TradePersistence] Struttura 'trades' mancante, ritorno array vuoto");
+                    System.out.println("[TradePersistence] Struttura 'trades' mancante");
                     return new JsonArray();
                 }
 
@@ -109,24 +82,15 @@ public class TradePersistence {
         }
     }
 
-    /**
-     * Salva tutti i trade nel file storico
-     * Thread-safe con lock di scrittura esclusivo
-     *
-     * @param trades JsonArray con tutti i trade da salvare
-     * @throws IOException se errori nella scrittura
-     */
+    //Salva tutti i trade nel file storico
     public static void saveTrades(JsonArray trades) throws IOException {
         ordersLock.writeLock().lock();
         try {
-            // Struttura unificata del file: {"trades": [...]}
             JsonObject root = new JsonObject();
             root.add("trades", trades);
-
-            // Scrittura con formattazione pretty
             try (FileWriter writer = new FileWriter(STORICO_FILE)) {
                 gson.toJson(root, writer);
-                writer.flush(); // Assicura che tutto sia scritto su disco
+                writer.flush();
             }
 
             System.out.println("[TradePersistence] Salvati " + trades.size() + " trade in " + STORICO_FILE);
@@ -136,13 +100,7 @@ public class TradePersistence {
         }
     }
 
-    /**
-     * Aggiunge un singolo trade al file storico
-     * Metodo ottimizzato: carica → aggiunge → salva
-     *
-     * @param tradeData JsonObject con i dati del trade
-     * @throws IOException se errori nella persistenza
-     */
+    //Aggiunge un singolo trade al file storico
     public static void addTrade(JsonObject tradeData) throws IOException {
         try {
             // Carica tutti i record esistenti
@@ -163,17 +121,7 @@ public class TradePersistence {
         }
     }
 
-    /**
-     * Salva un trade eseguito nel formato standard del sistema
-     * Crea il JsonObject con tutti i campi necessari e lo persiste
-     *
-     * @param bidOrder ordine di acquisto del trade
-     * @param askOrder ordine di vendita del trade
-     * @param size quantità scambiata in millesimi BTC
-     * @param price prezzo di esecuzione in millesimi USD
-     * @param tradeId ID univoco per il trade (fornito dall'esterno)
-     * @throws IOException se errori nella persistenza
-     */
+    //Salva un trade eseguito nel formato standard del sistema
     public static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price, int tradeId) throws IOException {
         try {
             // Crea record del trade nel formato standard
@@ -210,11 +158,7 @@ public class TradePersistence {
         }
     }
 
-    /**
-     * Conta il numero totale di trade nel file
-     *
-     * @return numero di trade salvati
-     */
+    //Conta il numero totale di trade nel file
     public static int getTotalTradesCount() {
         try {
             JsonArray trades = loadTrades();
@@ -225,11 +169,7 @@ public class TradePersistence {
         }
     }
 
-    /**
-     * Ottiene statistiche del file storico
-     *
-     * @return JsonObject con statistiche
-     */
+    //Ottiene statistiche del file storico
     public static JsonObject getStats() {
         JsonObject stats = new JsonObject();
 
@@ -262,11 +202,7 @@ public class TradePersistence {
         return stats;
     }
 
-    /**
-     * Verifica l'integrità del file storico
-     *
-     * @return true se il file è valido e leggibile
-     */
+    //Verifica l'integrità del file storico
     public static boolean verifyFileIntegrity() {
         try {
             JsonArray trades = loadTrades();
@@ -278,27 +214,17 @@ public class TradePersistence {
         }
     }
 
-    // === UTILITY METHODS ===
-
-    /**
-     * Formatta prezzo in millesimi per display
-     */
+    //Formatta prezzo in millesimi
     private static String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    /**
-     * Formatta size in millesimi per display
-     */
+    //Formatta size in millesimi
     private static String formatSize(int sizeInMillis) {
         return String.format("%.3f", sizeInMillis / 1000.0);
     }
 
-    /**
-     * Ottiene il path del file storico
-     *
-     * @return path assoluto del file
-     */
+    //Ottiene il path del file storico
     public static String getStoricoFilePath() {
         return new File(STORICO_FILE).getAbsolutePath();
     }

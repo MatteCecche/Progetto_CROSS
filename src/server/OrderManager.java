@@ -19,30 +19,14 @@ import server.orderbook.MatchingEngine;
 import java.util.stream.Collectors;
 
 /**
- * Coordinatore principale del sistema di trading CROSS
- *
- * Responsabilità dopo refactoring:
  * - Interfacce pubbliche per inserimento ordini (Limit, Market, Stop)
  * - Coordinamento tra componenti specializzati
  * - Gestione stato generale del sistema (prezzo corrente, allOrders)
  * - Storico prezzi OHLC per analisi mensili
  * - Esecuzione trade con persistenza e notifiche
  * - Inizializzazione sistema completo
- *
- * Componenti delegati:
- * - OrderBook: strutture dati bid/ask
- * - MatchingEngine: algoritmi price/time priority
- * - StopOrderManager: gestione Stop Orders
- * - PriceCalculator: formattazione e calcoli OHLC
- * - TradePersistence: salvataggio trade in JSON
- * - OrderIdGenerator: generazione ID univoci
- *
- * Thread-safe per uso in ambiente multithreaded del server
- * Size e Price sono espressi in millesimi secondo specifiche progetto
  */
 public class OrderManager {
-
-    // === ORDER BOOK STRUCTURES (Thread-Safe) ===
 
     // Mappa orderId -> Order per lookup veloce e cancellazioni
     private static final Map<Integer, Order> allOrders = new ConcurrentHashMap<>();
@@ -97,19 +81,12 @@ public class OrderManager {
         }
     }
 
-
-    // === INIZIALIZZAZIONE SISTEMA ===
-
-    /**
-     * Initialize semplificato - usa solo StoricoOrdini.json
-     * Verifica/crea il file unificato e inizializza il generatore orderID
-     */
+    //Verifica/crea il file unificato e inizializza il generatore orderID
     public static void initialize() throws IOException {
-        // Crea directory data se non esiste
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            dataDir.mkdirs();
-            System.out.println("[OrderManager] Creata directory data/");
+            System.out.println("[OrderManager] Errore: directory data non presente");
+            System.exit(1);
         }
 
         // Inizializza persistenza trade
@@ -122,18 +99,8 @@ public class OrderManager {
         System.out.println("[OrderManager] Prezzo corrente BTC: " + PriceCalculator.formatPrice(currentMarketPrice) + " USD");
     }
 
-    // === OPERAZIONI ORDINI ===
 
-    /**
-     * Inserisce un Limit Order nel sistema
-     * Formato JSON secondo ALLEGATO 1: type=bid/ask, size=NUMBER, price=NUMBER
-     *
-     * @param username utente proprietario dell'ordine
-     * @param type "bid" per acquisto, "ask" per vendita
-     * @param size quantità in millesimi di BTC
-     * @param price prezzo limite in millesimi di USD
-     * @return orderId se successo, -1 se errore
-     */
+    //Inserisce un Limit Order nel sistema
     public static int insertLimitOrder(String username, String type, int size, int price) {
         try {
             // Validazione parametri di input
@@ -168,15 +135,8 @@ public class OrderManager {
         }
     }
 
-    /**
-     * Inserisce un Market Order nel sistema (esecuzione immediata)
-     * Formato JSON secondo ALLEGATO 1: type=bid/ask, size=NUMBER
-     *
-     * @param username utente proprietario dell'ordine
-     * @param type "bid" per acquisto, "ask" per vendita
-     * @param size quantità in millesimi di BTC
-     * @return orderId se successo, -1 se errore (incluso order book vuoto)
-     */
+    //Inserisce un Market Order nel sistema (esecuzione immediata)
+
     public static int insertMarketOrder(String username, String type, int size) {
         try {
             // Validazione parametri
@@ -192,7 +152,7 @@ public class OrderManager {
                 return -1;
             }
 
-            // Creazione e esecuzione immediata Market Order
+            // Creazione ed esecuzione immediata Market Order
             Order marketOrder = new Order(username, type, "market", size, 0, 0);
             allOrders.put(marketOrder.getOrderId(), marketOrder);
 
@@ -210,16 +170,7 @@ public class OrderManager {
         }
     }
 
-    /**
-     * Inserisce un Stop Order nel sistema
-     * Formato JSON secondo ALLEGATO 1: type=bid/ask, size=NUMBER, price=NUMBER (stopPrice)
-     *
-     * @param username utente proprietario dell'ordine
-     * @param type "bid" per acquisto, "ask" per vendita
-     * @param size quantità in millesimi di BTC
-     * @param stopPrice prezzo di attivazione in millesimi di USD
-     * @return orderId se successo, -1 se errore
-     */
+    //Inserisce un Stop Order nel sistema
     public static int insertStopOrder(String username, String type, int size, int stopPrice) {
         try {
             // Validazione parametri
@@ -236,7 +187,7 @@ public class OrderManager {
                 return -1;
             }
 
-// Creazione Stop Order
+            // Creazione Stop Order
             Order stopOrder = new Order(username, type, "stop", size, 0, stopPrice);
             allOrders.put(stopOrder.getOrderId(), stopOrder);
             StopOrderManager.addStopOrder(stopOrder);
@@ -252,15 +203,7 @@ public class OrderManager {
         }
     }
 
-    /**
-     * Cancella un ordine dal sistema
-     * Formato JSON secondo ALLEGATO 1: orderId=NUMBER
-     * Codici risposta: 100=OK, 101=errore
-     *
-     * @param username utente richiedente (per controllo ownership)
-     * @param orderId ID dell'ordine da cancellare
-     * @return 100 se successo, 101 se errore
-     */
+    //Cancella un ordine dal sistema
     public static int cancelOrder(String username, int orderId) {
         try {
             Order order = allOrders.get(orderId);
@@ -271,7 +214,7 @@ public class OrderManager {
                 return 101;
             }
 
-            // Controllo ownership
+            // Controllo
             if (!order.getUsername().equals(username)) {
                 System.err.println("[OrderManager] Cancel fallito: ordine " + orderId + " appartiene a " + order.getUsername());
                 return 101;
@@ -302,15 +245,7 @@ public class OrderManager {
         }
     }
 
-    // === STORICO PREZZI ===
-
-    /**
-     * Implementa getPriceHistory leggendo dal file StoricoOrdini.json unificato
-     * Calcola OHLC (Open, High, Low, Close) per ogni giorno del mese richiesto
-     *
-     * @param monthYear formato "MMYYYY" (es: "012025" per gennaio 2025)
-     * @return JsonObject con dati storici OHLC secondo specifiche ALLEGATO 1
-     */
+    //Implementa getPriceHistory
     public static JsonObject getPriceHistory(String monthYear) {
         try {
             // Validazione formato input
@@ -447,18 +382,7 @@ public class OrderManager {
         }
     }
 
-    // === MATCHING ENGINE ===
-
-
-    /**
-     * Esegue un singolo trade tra due ordini
-     * Aggiorna prezzo di mercato, salva nel database e invia notifiche
-     *
-     * @param bidOrder ordine di acquisto
-     * @param askOrder ordine di vendita
-     * @param tradeSize quantità scambiata
-     * @param executionPrice prezzo di esecuzione
-     */
+    //Esegue un singolo trade tra due ordini
     private static void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
             System.out.println("[OrderManager] TRADE ESEGUITO: " +
@@ -493,27 +417,16 @@ public class OrderManager {
         }
     }
 
-
-    // === HELPER METHODS - VALIDAZIONE ===
-
     private static boolean isValidOrderType(String type) {
         return "bid".equals(type) || "ask".equals(type);
     }
 
-    /**
-     * Ottiene il prezzo corrente di mercato BTC
-     *
-     * @return prezzo corrente in millesimi USD
-     */
+    //Ottiene il prezzo corrente di mercato BTC
     public static int getCurrentMarketPrice() {
         return currentMarketPrice;
     }
 
-    /**
-     * Metodo pubblico per eseguire Market Orders (usato da StopOrderManager)
-     *
-     * @param marketOrder ordine da eseguire come market order
-     */
+    //Metodo pubblico per eseguire Market Orders (usato da StopOrderManager)
     public static void executeMarketOrder(Order marketOrder) {
         MatchingEngine.executeMarketOrder(marketOrder, OrderManager::executeTrade);
     }

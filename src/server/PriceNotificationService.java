@@ -39,14 +39,7 @@ public class PriceNotificationService {
     // Gson per serializzazione messaggi JSON
     private static final Gson gson = new Gson();
 
-    /**
-     * Inizializza il servizio di notifiche multicast
-     * Configurazione letta da file properties secondo specifiche progetto
-     *
-     * @param multicastAddress indirizzo gruppo multicast da file properties
-     * @param multicastPort porta gruppo multicast da file properties
-     * @throws IOException se errori nell'inizializzazione del socket o gruppo multicast
-     */
+    //Inizializza il servizio di notifiche multicast
     public static void initialize(String multicastAddress, int multicastPort) throws IOException {
         try {
             // Imposta parametri da configurazione
@@ -56,7 +49,7 @@ public class PriceNotificationService {
             // Crea socket per invio messaggi multicast (server side)
             multicastSender = new DatagramSocket();
 
-            // Imposta indirizzo del gruppo multicast seguendo le slide
+            // Imposta indirizzo del gruppo multicast
             multicastGroup = InetAddress.getByName(MULTICAST_ADDRESS);
 
             System.out.println("[PriceNotificationService] Servizio multicast inizializzato");
@@ -68,13 +61,7 @@ public class PriceNotificationService {
         }
     }
 
-    /**
-     * Registra un utente per ricevere notifiche quando il prezzo BTC supera una soglia
-     * Chiamato durante il processo di login secondo le specifiche
-     *
-     * @param username nome dell'utente che richiede notifiche
-     * @param thresholdPrice soglia di prezzo in millesimi USD (es: 60000000 = 60.000 USD)
-     */
+    //Registra un utente per ricevere notifiche quando il prezzo BTC supera una soglia
     public static void registerUserForPriceNotifications(String username, int thresholdPrice) {
         if (username == null || username.trim().isEmpty()) {
             System.err.println("[PriceNotificationService] Username non valido per registrazione notifiche");
@@ -91,25 +78,14 @@ public class PriceNotificationService {
                 " registrato per notifiche prezzo > " + formatPrice(thresholdPrice) + " USD");
     }
 
-    /**
-     * Rimuove la registrazione di un utente dalle notifiche (es: al logout)
-     *
-     * @param username nome dell'utente da rimuovere dalle notifiche
-     */
+    //Rimuove la registrazione di un utente dalle notifiche
     public static void unregisterUser(String username) {
         if (userThresholds.remove(username) != null) {
             System.out.println("[PriceNotificationService] Utente " + username + " rimosso dalle notifiche prezzo");
         }
     }
 
-    /**
-     * Controlla se il nuovo prezzo supera soglie di utenti registrati e invia notifiche
-     * Chiamato da OrderManager ogni volta che il prezzo di mercato cambia
-     *
-     * Implementa il meccanismo delle slide: crea DatagramPacket e invia al gruppo multicast
-     *
-     * @param newPrice nuovo prezzo BTC in millesimi USD
-     */
+    //Controlla se il nuovo prezzo supera soglie di utenti registrati e invia notifiche
     public static void checkAndNotifyPriceThresholds(int newPrice) {
         if (userThresholds.isEmpty()) {
             return; // Nessun utente interessato alle notifiche
@@ -125,8 +101,7 @@ public class PriceNotificationService {
                 if (newPrice >= threshold) {
                     sendPriceThresholdNotification(username, threshold, newPrice);
 
-                    // Rimuovi utente dopo notifica per evitare spam
-                    // (l'utente può re-registrarsi con nuova soglia se vuole)
+                    // Rimuovi utente dopo notifica
                     userThresholds.remove(username);
                 }
             }
@@ -136,14 +111,7 @@ public class PriceNotificationService {
         }
     }
 
-    /**
-     * Invia notifica multicast UDP per soglia prezzo superata
-     * Implementa il pattern delle slide multicast per invio messaggi
-     *
-     * @param username utente che aveva registrato la soglia
-     * @param threshold soglia prezzo che è stata superata
-     * @param currentPrice prezzo corrente che ha superato la soglia
-     */
+    //Invia notifica multicast UDP per soglia prezzo superata
     private static void sendPriceThresholdNotification(String username, int threshold, int currentPrice) {
         try {
             // Crea messaggio JSON per notifica multicast
@@ -178,11 +146,7 @@ public class PriceNotificationService {
         }
     }
 
-    /**
-     * Ottieni informazioni sul servizio multicast per i client
-     *
-     * @return JsonObject con configurazione multicast per i client
-     */
+    //Ottieni informazioni sul servizio multicast per i client
     public static JsonObject getMulticastInfo() {
         JsonObject info = new JsonObject();
         info.addProperty("multicastAddress", MULTICAST_ADDRESS);
@@ -191,9 +155,7 @@ public class PriceNotificationService {
         return info;
     }
 
-    /**
-     * Chiude il servizio multicast e rilascia le risorse
-     */
+    //Chiude il servizio multicast e rilascia le risorse
     public static void shutdown() {
         try {
             if (multicastSender != null && !multicastSender.isClosed()) {
@@ -207,23 +169,12 @@ public class PriceNotificationService {
         userThresholds.clear();
     }
 
-    // === UTILITY METHODS ===
-
-    /**
-     * Formatta prezzo in millesimi per display user-friendly
-     *
-     * @param priceInMillis prezzo in millesimi USD
-     * @return prezzo formattato (es: "58.000")
-     */
+    //Formatta prezzo in millesimi
     private static String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    /**
-     * Ottieni statistiche utenti registrati per debug
-     *
-     * @return numero di utenti attualmente registrati per notifiche
-     */
+    //Ottieni statistiche utenti registrati per debug
     public static int getRegisteredUsersCount() {
         return userThresholds.size();
     }

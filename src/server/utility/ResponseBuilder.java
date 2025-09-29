@@ -8,10 +8,8 @@ import com.google.gson.JsonObject;
  */
 public class ResponseBuilder {
 
-    // === OPERAZIONI AUTENTICAZIONE ===
-
     /**
-     * REGISTER - Codici secondo ALLEGATO 1
+     * REGISTER
      * 100 - OK
      * 101 - invalid password
      * 102 - username not available
@@ -48,7 +46,7 @@ public class ResponseBuilder {
     }
 
     /**
-     * UPDATE CREDENTIALS - Codici secondo ALLEGATO 1
+     * UPDATE CREDENTIALS
      * 100 - OK
      * 101 - invalid password
      * 102 - username not found
@@ -94,7 +92,7 @@ public class ResponseBuilder {
     }
 
     /**
-     * LOGIN - Codici secondo ALLEGATO 1
+     * LOGIN
      * 100 - OK
      * 101 - wrong credentials
      * 102 - user already logged
@@ -131,7 +129,7 @@ public class ResponseBuilder {
     }
 
     /**
-     * LOGOUT - Codici secondo ALLEGATO 1
+     * LOGOUT
      * 100 - OK
      * 101 - user not logged
      * 103 - other error cases
@@ -159,10 +157,8 @@ public class ResponseBuilder {
         }
     }
 
-    // === OPERAZIONI TRADING ===
-
     /**
-     * INSERT LIMIT/MARKET/STOP ORDER - Formato secondo ALLEGATO 1
+     * INSERT LIMIT/MARKET/STOP ORDER
      * Successo: {"orderId": NUMBER}
      * Errore: {"orderId": -1} (o messaggio di errore)
      */
@@ -187,7 +183,7 @@ public class ResponseBuilder {
     }
 
     /**
-     * CANCEL ORDER - Codici secondo ALLEGATO 1
+     * CANCEL ORDER
      * 100 - OK
      * 101 - order error (non esistente, già eseguito, non di proprietà)
      */
@@ -207,12 +203,7 @@ public class ResponseBuilder {
         }
     }
 
-    // === UTILITY GENERICHE ===
-
-    /**
-     * Crea risposta generica con codice e messaggio custom
-     * Usare solo quando nessuna delle classi specifiche si adatta
-     */
+    //Crea risposta generica con codice e messaggio custom
     public static JsonObject createGenericResponse(int code, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("response", code);
@@ -220,9 +211,7 @@ public class ResponseBuilder {
         return response;
     }
 
-    /**
-     * Verifica se un codice rappresenta successo (100)
-     */
+    //Verifica se un codice rappresenta successo (100)
     public static boolean isSuccessCode(int code) {
         return code == 100;
     }
