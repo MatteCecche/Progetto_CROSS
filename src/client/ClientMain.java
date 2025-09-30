@@ -28,7 +28,7 @@ import static server.utility.PriceCalculator.formatSize;
  * - Interfaccia utente con parsing comandi e validazione input
  * - Gestione connessioni RMI per registrazione nuovi utenti
  * - Gestione connessioni TCP per login e operazioni post-autenticazione
- * - Listener multicast per notifiche prezzo (vecchio ordinamento)
+ * - Listener multicast per notifiche prezzo
  * - Serializzazione/deserializzazione messaggi JSON
  * - Interpretazione codici di risposta del server
  */
@@ -50,8 +50,6 @@ public class ClientMain {
     // Scanner per input utente da console con gestione delle righe
     private static Scanner userScanner;
 
-    // === VARIABILI PER GESTIONE MULTICAST (VECCHIO ORDINAMENTO) ===
-
     // Listener multicast per notifiche prezzo
     private static MulticastListener multicastListener;
 
@@ -65,16 +63,7 @@ public class ClientMain {
     private static String multicastAddress;
     private static int multicastPort;
 
-    /**
-     * Main del client CROSS
-     * 1. Caricamento configurazione da file properties
-     * 2. Parsing e validazione parametri di connessione
-     * 3. Inizializzazione risorse (thread pool, scanner input)
-     * 4. Avvio interfaccia utente interattiva
-     * 5. Shutdown ordinato delle risorse
-     *
-     * @param args argomenti da linea di comando
-     */
+
     public static void main(String[] args) {
 
         System.out.println("[Client] ==== Avvio Client CROSS ====");
@@ -100,8 +89,6 @@ public class ClientMain {
             tcpPort = parseRequiredIntProperty(config, "TCP.port");
             rmiPort = parseRequiredIntProperty(config, "RMI.port");
             socketTimeout = parseRequiredIntProperty(config, "socket.timeout");
-
-            // Lettura parametri multicast da properties (vecchio ordinamento)
             multicastAddress = parseRequiredStringProperty(config, "multicast.address");
             multicastPort = parseRequiredIntProperty(config, "multicast.port");
 
@@ -130,12 +117,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Carica la configurazione dal file client.properties
-     *
-     * @return Properties oggetto con la configurazione caricata e validata
-     * @throws IOException se il file di configurazione non esiste o è illeggibile
-     */
+    //Carica la configurazione dal file client.properties
     private static Properties loadConfiguration() throws IOException {
         Properties prop = new Properties();
 
@@ -153,14 +135,7 @@ public class ClientMain {
         return prop;
     }
 
-    /**
-     * Effettua il parsing di un intero da Properties
-     *
-     * @param props oggetto Properties contenente la configurazione
-     * @param key chiave della property da leggere
-     * @return valore della property parsato come intero
-     * @throws IllegalArgumentException se la property manca o è invalida
-     */
+    //Effettua il parsing di un intero da Properties
     private static int parseRequiredIntProperty(Properties props, String key) {
         String value = props.getProperty(key);
 
@@ -175,14 +150,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Effettua il parsing di una stringa da Properties
-     *
-     * @param props oggetto Properties contenente la configurazione
-     * @param key chiave della property da leggere
-     * @return valore dell'hostname del server con trim applicato
-     * @throws IllegalArgumentException se la property manca o è vuota
-     */
+    //Effettua il parsing di una stringa da Properties
     private static String parseRequiredStringProperty(Properties props, String key) {
         String value = props.getProperty(key);
 
@@ -193,20 +161,11 @@ public class ClientMain {
         return value.trim();
     }
 
-    /**
-     * Interfaccia utente principale del client
-     * Implementa il loop interattivo con prompt per input comandi utente
-     *
-     * @param serverHost indirizzo del server CROSS
-     * @param tcpPort porta TCP del server per connessioni client
-     * @param rmiPort porta RMI del server per registrazioni
-     * @param socketTimeout timeout per socket TCP in millisecondi
-     */
+    //Interfaccia utente principale del client
     private static void startUserInterface(String serverHost, int tcpPort, int rmiPort, int socketTimeout) {
 
         System.out.println("\n[Client] === CROSS: an exChange oRder bOokS Service ===");
         System.out.println("[Client] Digitare 'help' per lista comandi disponibili");
-        System.out.println("[Client] Configurazione multicast: " + multicastAddress + ":" + multicastPort);
 
         while (running) {
             System.out.print(">> ");
@@ -243,24 +202,26 @@ public class ClientMain {
                         handleUpdateCredentials(parts, serverHost, tcpPort, socketTimeout);
                         break;
 
-                    // === COMANDI TRADING ===
                     case "insertlimitorder":
                         handleInsertLimitOrder(parts);
                         break;
+
                     case "insertmarketorder":
                         handleInsertMarketOrder(parts);
                         break;
+
                     case "insertstoporder":
                         handleInsertStopOrder(parts);
                         break;
+
                     case "cancelorder":
                         handleCancelOrder(parts);
                         break;
+
                     case "getpricehistory":
                         handleGetPriceHistory(parts);
                         break;
 
-                    // === NOTIFICHE PREZZO (VECCHIO ORDINAMENTO) ===
                     case "registerpricealert":
                         handleRegisterPriceAlert(parts);
                         break;
@@ -281,42 +242,25 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Mostra l'help con i comandi disponibili
-     * Stampa la lista completa dei comandi supportati con sintassi e descrizione
-     */
+    //Stampa la lista completa dei comandi
     private static void printHelp() {
         System.out.println("\n=== COMANDI DISPONIBILI ===");
         System.out.println("help                                               - Mostra questo messaggio");
-        System.out.println("register <username> <password>                    - Registra nuovo utente");
-        System.out.println("login <username> <password>                       - Effettua login");
+        System.out.println("register <username> <password>                     - Registra nuovo utente");
+        System.out.println("login <username> <password>                        - Effettua login");
         System.out.println("logout                                             - Disconnette dal server");
-        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>  - Aggiorna password");
-        System.out.println();
-        System.out.println("=== COMANDI TRADING (richiede login) ===");
+        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>   - Aggiorna password");
         System.out.println("insertLimitOrder <bid/ask> <size> <price>          - Inserisce ordine limite");
         System.out.println("insertMarketOrder <bid/ask> <size>                 - Inserisce ordine a mercato");
         System.out.println("insertStopOrder <bid/ask> <size> <stopPrice>       - Inserisce stop order");
         System.out.println("cancelOrder <orderId>                              - Cancella ordine");
         System.out.println("getPriceHistory <MMYYYY>                           - Ottieni storico prezzi mensile");
-        System.out.println();
-        System.out.println("=== NOTIFICHE PREZZO (vecchio ordinamento) ===");
         System.out.println("registerPriceAlert <soglia>                        - Registra notifica soglia prezzo");
-        System.out.println("                                                     Esempio: registerPriceAlert 65000000");
-        System.out.println("                                                     (per ricevere notifica quando BTC > 65.000 USD)");
-        System.out.println();
-        System.out.println("NOTA: size e price in millesimi (es: 1000 = 1 BTC, 58000000 = 58.000 USD)");
         System.out.println("esci                                               - Termina il client");
         System.out.println();
     }
 
-    /**
-     * Gestisce la registrazione di un nuovo utente via RMI
-     *
-     * @param parts comando parsato dall'input utente
-     * @param serverHost indirizzo del server per connessione RMI
-     * @param rmiPort porta del registry RMI
-     */
+    //Gestisce la registrazione di un nuovo utente via RMI
     private static void handleRegistration(String[] parts, String serverHost, int rmiPort) {
         try {
             // Validazione numero parametri
@@ -366,15 +310,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce il login dell'utente e avvia listener multicast per notifiche prezzo
-     * Estende funzionalità esistente con supporto multicast (vecchio ordinamento)
-     *
-     * @param parts comando parsato dall'input utente
-     * @param serverHost indirizzo del server per connessione TCP
-     * @param tcpPort porta TCP del server
-     * @param socketTimeout timeout per la connessione
-     */
+    //Gestisce il login dell'utente e avvia listener multicast per notifiche prezzo
     private static void handleLogin(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
         try {
             // Validazione parametri
@@ -474,9 +410,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce il logout dell'utente e ferma listener multicast
-     */
+    //Gestisce il logout dell'utente e ferma listener multicast
     private static void handleLogout() {
         try {
             // Controlla se effettivamente loggato
@@ -533,12 +467,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce comando per registrare notifiche soglia prezzo
-     * Sintassi: registerPriceAlert <soglia_prezzo>
-     *
-     * @param parts comando parsato dall'input utente
-     */
+    //Gestisce comando per registrare notifiche soglia prezzo
     private static void handleRegisterPriceAlert(String[] parts) {
         try {
             // Controllo login
@@ -593,7 +522,7 @@ public class ClientMain {
             // Gestione risultato
             switch (responseCode) {
                 case 100:
-                    System.out.println("[Client] ✅ Notifiche prezzo registrate con successo!");
+                    System.out.println("[Client] Notifiche prezzo registrate con successo!");
                     System.out.println("[Client] Soglia: " + formatPrice(thresholdPrice) + " USD");
                     System.out.println("[Client] Riceverai notifiche multicast quando il prezzo BTC supererà questa soglia");
 
@@ -626,11 +555,8 @@ public class ClientMain {
         }
     }
 
-    // === METODI PER GESTIONE MULTICAST LISTENER ===
 
-    /**
-     * Avvia il listener multicast per ricevere notifiche prezzo dal server
-     */
+    //Avvia il listener multicast per ricevere notifiche prezzo dal server
     private static void startMulticastListener() {
         try {
             if (multicastListener == null && currentLoggedUsername != null) {
@@ -651,9 +577,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Ferma il listener multicast
-     */
+    //Ferma il listener multicast
     private static void stopMulticastListener() {
         try {
             if (multicastListener != null) {
@@ -680,12 +604,7 @@ public class ClientMain {
         }
     }
 
-// SOSTITUISCI questi metodi nel ClientMain.java con le implementazioni complete:
-
-    /**
-     * Gestisce comando updateCredentials dell'utente
-     * Formato: updateCredentials <username> <old_password> <new_password>
-     */
+    //Gestisce comando updateCredentials dell'utente
     private static void handleUpdateCredentials(String[] parts, String serverHost, int tcpPort, int socketTimeout) {
         try {
             // Validazione parametri
@@ -731,32 +650,32 @@ public class ClientMain {
 
             JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
 
-            // Gestione codici risposta secondo ALLEGATO 1
+            // Gestione codici risposta
             if (response.has("response")) {
                 int responseCode = response.get("response").getAsInt();
                 String errorMsg = response.has("errorMessage") ? response.get("errorMessage").getAsString() : "";
 
                 switch (responseCode) {
                     case 100:
-                        System.out.println("[Client] ✅ Password aggiornata con successo!");
+                        System.out.println("[Client] Password aggiornata con successo!");
                         break;
                     case 101:
-                        System.out.println("[Client] ❌ Errore: nuova password non valida - " + errorMsg);
+                        System.out.println("[Client] Errore: nuova password non valida - " + errorMsg);
                         break;
                     case 102:
-                        System.out.println("[Client] ❌ Errore: username/password errati o utente inesistente - " + errorMsg);
+                        System.out.println("[Client] Errore: username/password errati o utente inesistente - " + errorMsg);
                         break;
                     case 103:
-                        System.out.println("[Client] ❌ Errore: nuova password uguale alla precedente - " + errorMsg);
+                        System.out.println("[Client] Errore: nuova password uguale alla precedente - " + errorMsg);
                         break;
                     case 104:
-                        System.out.println("[Client] ❌ Errore: utente attualmente loggato - " + errorMsg);
+                        System.out.println("[Client] Errore: utente attualmente loggato - " + errorMsg);
                         break;
                     case 105:
-                        System.out.println("[Client] ❌ Errore interno del server - " + errorMsg);
+                        System.out.println("[Client] Errore interno del server - " + errorMsg);
                         break;
                     default:
-                        System.out.println("[Client] ❌ Errore sconosciuto (codice " + responseCode + ") - " + errorMsg);
+                        System.out.println("[Client] Errore sconosciuto (codice " + responseCode + ") - " + errorMsg);
                 }
             }
 
@@ -765,10 +684,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce comando insertLimitOrder dell'utente
-     * Formato: insertLimitOrder <type> <size> <price>
-     */
+    //Gestisce comando insertLimitOrder dell'utente
     private static void handleInsertLimitOrder(String[] parts) {
         try {
             // Validazione parametri
@@ -833,14 +749,14 @@ public class ClientMain {
             if (response.has("orderId")) {
                 int orderId = response.get("orderId").getAsInt();
                 if (orderId == -1) {
-                    System.out.println("[Client] ❌ Errore inserimento Limit Order");
+                    System.out.println("[Client] Errore inserimento Limit Order");
                 } else {
-                    System.out.println("[Client] ✅ Limit Order creato con successo!");
+                    System.out.println("[Client] Limit Order creato con successo!");
                     System.out.println("[Client] Order ID: " + orderId);
                     System.out.println("[Client] Tipo: " + type + ", Size: " + formatSize(size) + " BTC, Prezzo: " + formatPrice(price) + " USD");
                 }
             } else {
-                System.out.println("[Client] ❌ Risposta server non valida");
+                System.out.println("[Client] Risposta server non valida");
             }
 
         } catch (Exception e) {
@@ -848,10 +764,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce comando insertMarketOrder dell'utente
-     * Formato: insertMarketOrder <type> <size>
-     */
+    //Gestisce comando insertMarketOrder dell'utente
     private static void handleInsertMarketOrder(String[] parts) {
         try {
             // Validazione parametri
@@ -888,7 +801,7 @@ public class ClientMain {
                 return;
             }
 
-            // Costruzione richiesta JSON secondo ALLEGATO 1
+            // Costruzione richiesta JSON
             JsonObject request = new JsonObject();
             request.addProperty("operation", "insertMarketOrder");
 
@@ -913,15 +826,15 @@ public class ClientMain {
             if (response.has("orderId")) {
                 int orderId = response.get("orderId").getAsInt();
                 if (orderId == -1) {
-                    System.out.println("[Client] ❌ Market Order rifiutato (possibile mancanza di liquidità)");
+                    System.out.println("[Client] Market Order rifiutato");
                 } else {
-                    System.out.println("[Client] ✅ Market Order eseguito!");
+                    System.out.println("[Client] Market Order eseguito!");
                     System.out.println("[Client] Order ID: " + orderId);
                     System.out.println("[Client] Tipo: " + type + ", Size: " + formatSize(size) + " BTC");
                     System.out.println("[Client] Eseguito al prezzo di mercato corrente");
                 }
             } else {
-                System.out.println("[Client] ❌ Risposta server non valida");
+                System.out.println("[Client] Risposta server non valida");
             }
 
         } catch (Exception e) {
@@ -929,18 +842,12 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce comando insertStopOrder dell'utente
-     * Formato: insertStopOrder <type> <size> <stopPrice>
-     */
+    //Gestisce comando insertStopOrder dell'utente
     private static void handleInsertStopOrder(String[] parts) {
         try {
             // Validazione parametri
             if (parts.length != 4) {
                 System.out.println("[Client] Uso: insertStopOrder <type> <size> <stopPrice>");
-                System.out.println("[Client] type: bid (acquisto) o ask (vendita)");
-                System.out.println("[Client] size: quantità in millesimi di BTC (1000 = 1 BTC)");
-                System.out.println("[Client] stopPrice: prezzo di attivazione in millesimi di USD (57000000 = 57.000 USD)");
                 return;
             }
 
@@ -971,14 +878,14 @@ public class ClientMain {
                 return;
             }
 
-            // Costruzione richiesta JSON secondo ALLEGATO 1
+            // Costruzione richiesta JSON
             JsonObject request = new JsonObject();
             request.addProperty("operation", "insertStopOrder");
 
             JsonObject values = new JsonObject();
             values.addProperty("type", type);
             values.addProperty("size", size);
-            values.addProperty("price", stopPrice); // Campo "price" per stopPrice secondo ALLEGATO 1
+            values.addProperty("price", stopPrice);
             request.add("values", values);
 
             // Invio richiesta
@@ -997,16 +904,15 @@ public class ClientMain {
             if (response.has("orderId")) {
                 int orderId = response.get("orderId").getAsInt();
                 if (orderId == -1) {
-                    System.out.println("[Client] ❌ Errore inserimento Stop Order (verifica che stopPrice sia corretto)");
+                    System.out.println("[Client] Errore inserimento Stop Order (verifica che stopPrice sia corretto)");
                 } else {
-                    System.out.println("[Client] ✅ Stop Order creato con successo!");
+                    System.out.println("[Client] Stop Order creato con successo!");
                     System.out.println("[Client] Order ID: " + orderId);
                     System.out.println("[Client] Tipo: " + type + ", Size: " + formatSize(size) + " BTC");
                     System.out.println("[Client] Stop Price: " + formatPrice(stopPrice) + " USD");
-                    System.out.println("[Client] Si attiverà come Market Order al raggiungimento del prezzo");
                 }
             } else {
-                System.out.println("[Client] ❌ Risposta server non valida");
+                System.out.println("[Client] Risposta server non valida");
             }
 
         } catch (Exception e) {
@@ -1014,10 +920,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Gestisce comando cancelOrder dell'utente
-     * Formato: cancelOrder <orderId>
-     */
+    //Gestisce comando cancelOrder dell'utente
     private static void handleCancelOrder(String[] parts) {
         try {
             // Validazione parametri
@@ -1045,7 +948,7 @@ public class ClientMain {
                 return;
             }
 
-            // Costruzione richiesta JSON secondo ALLEGATO 1
+            // Costruzione richiesta JSON
             JsonObject request = new JsonObject();
             request.addProperty("operation", "cancelOrder");
 
@@ -1065,23 +968,23 @@ public class ClientMain {
 
             JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
 
-            // Gestione codici risposta secondo ALLEGATO 1
+            // Gestione codici risposta
             if (response.has("response")) {
                 int responseCode = response.get("response").getAsInt();
                 String errorMsg = response.has("errorMessage") ? response.get("errorMessage").getAsString() : "";
 
                 switch (responseCode) {
                     case 100:
-                        System.out.println("[Client] ✅ Ordine " + orderId + " cancellato con successo!");
+                        System.out.println("[Client] Ordine " + orderId + " cancellato con successo!");
                         break;
                     case 101:
-                        System.out.println("[Client] ❌ Errore: ordine non esistente, già eseguito, o non di tua proprietà - " + errorMsg);
+                        System.out.println("[Client] Errore: ordine non esistente, già eseguito, o non di tua proprietà - " + errorMsg);
                         break;
                     default:
-                        System.out.println("[Client] ❌ Errore cancellazione ordine (codice " + responseCode + ") - " + errorMsg);
+                        System.out.println("[Client] Errore cancellazione ordine (codice " + responseCode + ") - " + errorMsg);
                 }
             } else {
-                System.out.println("[Client] ❌ Risposta server non valida");
+                System.out.println("[Client] Risposta server non valida");
             }
 
         } catch (Exception e) {
@@ -1090,12 +993,7 @@ public class ClientMain {
     }
 
 
-    /**
-     * Gestisce comando getPriceHistory dell'utente
-     * Formato comando: getPriceHistory <MMYYYY>
-     *
-     * @param parts comando parsato dall'input utente
-     */
+    //Gestisce comando getPriceHistory
     private static void handleGetPriceHistory(String[] parts) {
         try {
             // Validazione parametri
@@ -1132,7 +1030,7 @@ public class ClientMain {
                 return;
             }
 
-            // Costruzione richiesta JSON secondo ALLEGATO 1
+            // Costruzione richiesta JSON
             JsonObject request = new JsonObject();
             request.addProperty("operation", "getPriceHistory");
 
@@ -1177,14 +1075,7 @@ public class ClientMain {
         }
     }
 
-    /**
-     * Visualizza i dati storici dei prezzi in formato tabellare user-friendly
-     * Mostra OHLC (Open, High, Low, Close) + Volume per ogni giorno
-     *
-     * @param month mese richiesto in formato MMYYYY
-     * @param totalDays numero totale di giorni con dati
-     * @param historyData array JSON contenente i dati storici
-     */
+    //Visualizza i dati storici dei prezzi
     private static void displayPriceHistory(String month, int totalDays, JsonArray historyData) {
         System.out.println("\n" + "=".repeat(80));
         System.out.println("📈 STORICO PREZZI BTC - " + formatMonthYear(month));
@@ -1232,12 +1123,7 @@ public class ClientMain {
         System.out.println("💡 Prezzi in USD, Volume in BTC");
     }
 
-    /**
-     * Formatta mese da MMYYYY a formato leggibile
-     *
-     * @param monthYear formato MMYYYY (es: "012025")
-     * @return formato leggibile (es: "Gennaio 2025")
-     */
+    //Formatta mese da MMYYYY
     private static String formatMonthYear(String monthYear) {
         try {
             int month = Integer.parseInt(monthYear.substring(0, 2));
@@ -1250,51 +1136,31 @@ public class ClientMain {
 
             return mesi[month] + " " + year;
         } catch (Exception e) {
-            return monthYear; // Fallback al formato originale
+            return monthYear;
         }
     }
 
-    /**
-     * Formatta data da YYYY-MM-DD a formato leggibile
-     *
-     * @param dateStr data in formato ISO (es: "2025-01-15")
-     * @return data formattata (es: "15/01/2025")
-     */
+    //Formatta data da YYYY-MM-DD a formato leggibile
     private static String formatDate(String dateStr) {
         try {
             String[] parts = dateStr.split("-");
             return parts[2] + "/" + parts[1] + "/" + parts[0];
         } catch (Exception e) {
-            return dateStr; // Fallback al formato originale
+            return dateStr;
         }
     }
 
-    /**
-     * Formatta volume in formato leggibile
-     *
-     * @param volumeInMillis volume in millesimi di BTC
-     * @return volume formattato (es: "1.250 BTC")
-     */
+    //Formatta volume in formato leggibile
     private static String formatVolume(int volumeInMillis) {
         return String.format("%.3f BTC", volumeInMillis / 1000.0);
     }
 
-    // === UTILITY METHODS ===
-
-    /**
-     * Formatta prezzo in millesimi per display user-friendly
-     *
-     * @param priceInMillis prezzo in millesimi USD
-     * @return prezzo formattato (es: "58.000")
-     */
+    //Formatta prezzo in millesimi
     private static String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    /**
-     * Esegue lo shutdown ordinato del client
-     * Ferma listener multicast, chiude connessioni TCP, libera risorse
-     */
+    //Esegue lo shutdown ordinato del client
     private static void shutdownClient() {
         System.out.println("[Client] Iniziando shutdown del client...");
 

@@ -8,57 +8,21 @@ import java.util.stream.Collectors;
 
 /**
  * Implementa l'algoritmo di matching per il sistema di trading CROSS
- *
- * Responsabilità:
- * - Algoritmo di matching price/time priority tra ordini bid e ask
- * - Esecuzione Market Orders contro order book esistente
- * - Gestione matching parziali e completi
- * - Coordinamento con OrderBook per aggiornamenti strutture dati
- * - Ottimizzazione performance per matching su volumi elevati
- *
- * Algoritmo Price/Time Priority (secondo specifiche progetto):
  * - PRICE Priority: ordini con prezzo migliore hanno precedenza
- *   * BID: prezzi più alti hanno precedenza (massima offerta d'acquisto)
- *   * ASK: prezzi più bassi hanno precedenza (minima richiesta di vendita)
+ * - BID: prezzi più alti hanno precedenza (massima offerta d'acquisto)
+ * - ASK: prezzi più bassi hanno precedenza (minima richiesta di vendita)
  * - TIME Priority: a parità di prezzo, ordini più vecchi hanno precedenza
  * - MATCHING: esecuzione quando bestBid >= bestAsk
- *
- * Extracted from OrderManager per principio Single Responsibility
- * Thread-safe per uso in ambiente multithreaded del server
  */
 public class MatchingEngine {
 
-    // === INTERFACES PER CALLBACKS ===
-
-    /**
-     * Interface per callback di esecuzione trade
-     * Permette di disaccoppiare MatchingEngine dal sistema di persistenza
-     */
-    @FunctionalInterface
+    //Interface per callback di esecuzione trade
     public interface TradeExecutor {
-        /**
-         * Esegue un trade tra due ordini
-         *
-         * @param bidOrder ordine di acquisto
-         * @param askOrder ordine di vendita
-         * @param tradeSize quantità scambiata
-         * @param executionPrice prezzo di esecuzione
-         */
+        //Esegue un trade tra due ordini
         void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice);
     }
 
-    // === MATCHING LIMIT ORDERS (Price/Time Priority) ===
-
-    /**
-     * Esegue il matching automatico tra ordini bid e ask nell'order book
-     * Implementa l'algoritmo price/time priority secondo specifiche CROSS
-     *
-     * Chiamato automaticamente dopo ogni inserimento di Limit Order
-     * Continua il matching fino a quando bestBid >= bestAsk
-     *
-     * @param tradeExecutor callback per eseguire i trade risultanti
-     * @return numero di trade eseguiti durante questa sessione di matching
-     */
+    //Esegue il matching automatico tra ordini bid e ask nell'order book
     public static int performLimitOrderMatching(TradeExecutor tradeExecutor) {
         int tradesExecuted = 0;
 
@@ -149,22 +113,7 @@ public class MatchingEngine {
         return tradesExecuted;
     }
 
-    // === ESECUZIONE MARKET ORDERS ===
-
-    /**
-     * Esegue un Market Order contro l'order book esistente
-     * Consuma liquidità dal lato opposto fino a completamento o esaurimento
-     *
-     * Market Order caratteristiche:
-     * - Esecuzione immediata al prezzo di mercato
-     * - Consuma ordini dal lato opposto in ordine di prezzo ottimale
-     * - BUY: consuma ASK orders dal prezzo più basso
-     * - SELL: consuma BID orders dal prezzo più alto
-     *
-     * @param marketOrder ordine di mercato da eseguire
-     * @param tradeExecutor callback per eseguire i trade risultanti
-     * @return true se completamente eseguito, false se parzialmente eseguito
-     */
+    //Esegue un Market Order contro l'order book esistente
     public static boolean executeMarketOrder(Order marketOrder, TradeExecutor tradeExecutor) {
         if (!"market".equals(marketOrder.getOrderType())) {
             throw new IllegalArgumentException("Solo Market Orders possono essere processati da executeMarketOrder()");
@@ -251,15 +200,7 @@ public class MatchingEngine {
         return fullyExecuted;
     }
 
-    // === HELPER METHODS ===
-
-    /**
-     * Ottiene prezzi ordinati ottimalmente per esecuzione Market Order
-     *
-     * @param oppositeType tipo del lato opposto ("bid" o "ask")
-     * @param oppositeBook mappa dell'order book opposto
-     * @return lista prezzi ordinata per consumo ottimale
-     */
+    //Ottiene prezzi ordinati ottimalmente per esecuzione Market Order
     private static List<Integer> getSortedPricesForMarketOrder(String oppositeType, Map<Integer, LinkedList<Order>> oppositeBook) {
         if ("ask".equals(oppositeType)) {
             // Market BUY: consuma ASK orders dal prezzo più basso (crescente)
@@ -274,13 +215,7 @@ public class MatchingEngine {
         }
     }
 
-    // === INFORMAZIONI STATO MATCHING ===
-
-    /**
-     * Verifica se è possibile un matching immediato
-     *
-     * @return true se bestBid >= bestAsk (matching possibile)
-     */
+    //Verifica se è possibile un matching immediato
     public static boolean isMatchingPossible() {
         Integer bestBid = OrderBook.getBestBidPrice();
         Integer bestAsk = OrderBook.getBestAskPrice();
@@ -288,11 +223,7 @@ public class MatchingEngine {
         return bestBid != null && bestAsk != null && bestBid >= bestAsk;
     }
 
-    /**
-     * Calcola lo spread corrente bid/ask
-     *
-     * @return spread in millesimi USD, o -1 se non calcolabile
-     */
+    //Calcola lo spread corrente bid/ask
     public static int getCurrentSpread() {
         Integer bestBid = OrderBook.getBestBidPrice();
         Integer bestAsk = OrderBook.getBestAskPrice();
@@ -304,11 +235,7 @@ public class MatchingEngine {
         return -1; // Spread non calcolabile
     }
 
-    /**
-     * Ottiene informazioni sullo stato corrente del matching
-     *
-     * @return mappa con statistiche matching engine
-     */
+    //Ottiene informazioni sullo stato corrente del matching
     public static Map<String, Object> getMatchingEngineStats() {
         Map<String, Object> stats = new HashMap<>();
 
@@ -336,9 +263,7 @@ public class MatchingEngine {
         return stats;
     }
 
-    /**
-     * Stampa stato corrente del matching engine per debugging
-     */
+    //Stampa stato corrente del matching engine
     public static void printMatchingEngineStatus() {
         System.out.println("\n=== MATCHING ENGINE STATUS ===");
 
@@ -364,14 +289,7 @@ public class MatchingEngine {
         System.out.println("=============================\n");
     }
 
-    // === VALIDAZIONI ===
-
-    /**
-     * Verifica che l'order book sia in stato consistente per matching
-     * Utile per debugging e testing
-     *
-     * @return true se order book è valido per matching
-     */
+    //Verifica che l'order book sia in stato consistente per matching
     public static boolean validateOrderBookConsistency() {
         try {
             // Verifica che non ci siano prezzi che permetterebbero matching immediato

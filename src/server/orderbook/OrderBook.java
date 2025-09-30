@@ -4,26 +4,8 @@ import server.OrderManager.Order;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Gestisce le strutture dati dell'Order Book del sistema CROSS
- *
- * Responsabilità:
- * - Mantenimento strutture dati bid/ask thread-safe
- * - Inserimento/rimozione ordini con ordinamento price/time priority
- * - Calcolo migliori prezzi bid/ask
- * - Controllo liquidità disponibile per Market Orders
- * - Accesso thread-safe alle informazioni order book
- *
- * Algoritmo ordinamento:
- * - BID Orders: prezzo decrescente (migliore = più alto), poi time priority
- * - ASK Orders: prezzo crescente (migliore = più basso), poi time priority
- *
- * Estratto da OrderManager per principio Single Responsibility
- * Thread-safe per uso in ambiente multithreaded del server
- */
+//Gestisce le strutture dati dell'Order Book del sistema CROSS
 public class OrderBook {
-
-    // === STRUTTURE DATI ORDER BOOK (Thread-Safe) ===
 
     // Ordini BID (acquisto) organizzati per prezzo
     // Key: prezzo, Value: lista ordinata per tempo (FIFO)
@@ -33,14 +15,7 @@ public class OrderBook {
     // Key: prezzo, Value: lista ordinata per tempo (FIFO)
     private static final Map<Integer, LinkedList<Order>> askOrders = new ConcurrentHashMap<>();
 
-    // === INSERIMENTO ORDINI ===
-
-    /**
-     * Aggiunge un ordine BID all'order book mantenendo ordinamento prezzo/tempo
-     * Gli ordini con lo stesso prezzo sono ordinati per timestamp (time priority)
-     *
-     * @param order ordine BID da inserire
-     */
+    //Aggiunge un ordine BID all'order book mantenendo ordinamento prezzo/tempo
     public static void addToBidBook(Order order) {
         bidOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
 
@@ -48,12 +23,7 @@ public class OrderBook {
                 " @ prezzo " + order.getPrice() + " (totale bid levels: " + bidOrders.size() + ")");
     }
 
-    /**
-     * Aggiunge un ordine ASK all'order book mantenendo ordinamento prezzo/tempo
-     * Gli ordini con lo stesso prezzo sono ordinati per timestamp (time priority)
-     *
-     * @param order ordine ASK da inserire
-     */
+    //Aggiunge un ordine ASK all'order book mantenendo ordinamento prezzo/tempo
     public static void addToAskBook(Order order) {
         askOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
 
@@ -61,15 +31,8 @@ public class OrderBook {
                 " @ prezzo " + order.getPrice() + " (totale ask levels: " + askOrders.size() + ")");
     }
 
-    // === RIMOZIONE ORDINI ===
 
-    /**
-     * Rimuove un ordine dall'order book appropriato (bid o ask)
-     * Pulisce automaticamente i livelli di prezzo vuoti
-     *
-     * @param order ordine da rimuovere
-     * @return true se rimosso con successo, false se non trovato
-     */
+    //Rimuove un ordine dall'order book appropriato (bid o ask)
     public static boolean removeOrder(Order order) {
         Map<Integer, LinkedList<Order>> book = "bid".equals(order.getType()) ? bidOrders : askOrders;
         LinkedList<Order> ordersAtPrice = book.get(order.getPrice());
@@ -97,14 +60,7 @@ public class OrderBook {
         return false;
     }
 
-    /**
-     * Rimuove il primo ordine da un livello di prezzo specifico
-     * Utilizzato principalmente dal matching engine
-     *
-     * @param price prezzo del livello
-     * @param isBid true per bid orders, false per ask orders
-     * @return ordine rimosso o null se livello vuoto
-     */
+    //Rimuove il primo ordine da un livello di prezzo specifico
     public static Order removeFirstOrderAtPrice(int price, boolean isBid) {
         Map<Integer, LinkedList<Order>> book = isBid ? bidOrders : askOrders;
         LinkedList<Order> ordersAtPrice = book.get(price);
@@ -125,77 +81,41 @@ public class OrderBook {
         return null;
     }
 
-    // === ACCESSO INFORMAZIONI ORDER BOOK ===
-
-    /**
-     * Ottiene il miglior prezzo BID (più alto)
-     *
-     * @return prezzo BID più alto o null se order book bid vuoto
-     */
+    //Ottiene il miglior prezzo BID (più alto)
     public static Integer getBestBidPrice() {
         return bidOrders.keySet().stream().max(Integer::compareTo).orElse(null);
     }
 
-    /**
-     * Ottiene il miglior prezzo ASK (più basso)
-     *
-     * @return prezzo ASK più basso o null se order book ask vuoto
-     */
+    //Ottiene il miglior prezzo ASK (più basso)
     public static Integer getBestAskPrice() {
         return askOrders.keySet().stream().min(Integer::compareTo).orElse(null);
     }
 
-    /**
-     * Ottiene la lista di ordini per un prezzo specifico (bid)
-     *
-     * @param price prezzo da cercare
-     * @return lista ordini BID a quel prezzo o null se non esistenti
-     */
+    //Ottiene la lista di ordini per un prezzo specifico (bid)
     public static LinkedList<Order> getBidOrdersAtPrice(int price) {
         return bidOrders.get(price);
     }
 
-    /**
-     * Ottiene la lista di ordini per un prezzo specifico (ask)
-     *
-     * @param price prezzo da cercare
-     * @return lista ordini ASK a quel prezzo o null se non esistenti
-     */
+    //Ottiene la lista di ordini per un prezzo specifico (ask)
     public static LinkedList<Order> getAskOrdersAtPrice(int price) {
         return askOrders.get(price);
     }
 
-    /**
-     * Ottiene tutti i livelli di prezzo BID ordinati (decrescente)
-     *
-     * @return lista prezzi BID ordinata dal più alto al più basso
-     */
+    //Ottiene tutti i livelli di prezzo BID ordinati (decrescente)
     public static List<Integer> getAllBidPrices() {
         return bidOrders.keySet().stream()
                 .sorted((a, b) -> Integer.compare(b, a)) // Decrescente
                 .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
     }
 
-    /**
-     * Ottiene tutti i livelli di prezzo ASK ordinati (crescente)
-     *
-     * @return lista prezzi ASK ordinata dal più basso al più alto
-     */
+    //Ottiene tutti i livelli di prezzo ASK ordinati (crescente)
     public static List<Integer> getAllAskPrices() {
         return askOrders.keySet().stream()
                 .sorted(Integer::compareTo) // Crescente
                 .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
     }
 
-    // === CONTROLLO LIQUIDITÀ ===
-
-    /**
-     * Verifica se c'è abbastanza liquidità per eseguire un Market Order
-     *
-     * @param orderType "bid" per acquisto, "ask" per vendita
-     * @param requiredSize quantità richiesta in millesimi di BTC
-     * @return true se liquidità sufficiente disponibile
-     */
+    //Verifica se c'è abbastanza liquidità per eseguire un Market Order
     public static boolean hasLiquidity(String orderType, int requiredSize) {
         // Market buy ha bisogno di ask orders, market sell ha bisogno di bid orders
         Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(orderType) ? askOrders : bidOrders;
@@ -215,12 +135,7 @@ public class OrderBook {
         return hasEnough;
     }
 
-    /**
-     * Calcola il volume totale disponibile per un tipo di ordine
-     *
-     * @param orderType "bid" per contare ask volume, "ask" per contare bid volume
-     * @return volume totale in millesimi di BTC
-     */
+    //Calcola il volume totale disponibile per un tipo di ordine
     public static int getTotalVolumeAvailable(String orderType) {
         Map<Integer, LinkedList<Order>> bookToCheck = "bid".equals(orderType) ? askOrders : bidOrders;
 
@@ -230,14 +145,8 @@ public class OrderBook {
                 .sum();
     }
 
-    // === STATISTICHE ORDER BOOK ===
 
-    /**
-     * Ottiene statistiche generali dell'order book
-     * Utile per debugging e monitoraggio
-     *
-     * @return JsonObject con statistiche correnti
-     */
+    //Ottiene statistiche generali dell'order book
     public static Map<String, Object> getOrderBookStats() {
         Map<String, Object> stats = new HashMap<>();
 
@@ -259,10 +168,7 @@ public class OrderBook {
         return stats;
     }
 
-    /**
-     * Stampa stato corrente dell'order book per debugging
-     * Mostra i migliori 5 livelli per lato
-     */
+    //Stampa stato corrente dell'order book per debugging
     public static void printOrderBookSnapshot() {
         System.out.println("\n=== ORDER BOOK SNAPSHOT ===");
 
@@ -296,41 +202,24 @@ public class OrderBook {
         System.out.println("========================\n");
     }
 
-    // === ACCESSO DIRETTO STRUTTURE (per MatchingEngine) ===
-
-    /**
-     * Accesso diretto al map bid orders (per matching engine)
-     * ATTENZIONE: usare solo per lettura o in contesti thread-safe
-     */
+    //Accesso diretto al map bid orders (per matching engine)
     public static Map<Integer, LinkedList<Order>> getBidOrdersMap() {
         return bidOrders;
     }
 
-    /**
-     * Accesso diretto al map ask orders (per matching engine)
-     * ATTENZIONE: usare solo per lettura o in contesti thread-safe
-     */
+    //Accesso diretto al map ask orders (per matching engine)
     public static Map<Integer, LinkedList<Order>> getAskOrdersMap() {
         return askOrders;
     }
 
-    // === UTILITY ===
-
-    /**
-     * Pulisce completamente l'order book (per testing/reset)
-     * DA USARE CON CAUTELA
-     */
+    //Pulisce completamente l'order book (per testing/reset)
     public static void clearAll() {
         bidOrders.clear();
         askOrders.clear();
         System.out.println("[OrderBook] Order book completamente pulito");
     }
 
-    /**
-     * Verifica se l'order book è vuoto
-     *
-     * @return true se non ci sono ordini bid né ask
-     */
+    //Verifica se l'order book è vuoto
     public static boolean isEmpty() {
         return bidOrders.isEmpty() && askOrders.isEmpty();
     }

@@ -7,18 +7,10 @@ import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.MulticastSocket;
 
-/**
- * Thread listener per ricevere notifiche multicast dal server CROSS
- * Implementa la ricezione di notifiche di soglia prezzo secondo le specifiche del vecchio ordinamento
- *
- * Funziona come thread separato che ascolta continuamente messaggi multicast UDP
- * dal server quando vengono superate soglie di prezzo BTC registrate dall'utente
- *
- * Implementa il pattern delle slide multicast: MulticastSocket.joinGroup(), receive()
- */
+//Thread listener per ricevere notifiche multicast dal server CROSS
 public class MulticastListener implements Runnable {
 
-    // Configurazione multicast (deve coincidere con il server)
+    // Configurazione multicast
     private final String multicastAddress;
     private final int multicastPort;
 
@@ -32,13 +24,7 @@ public class MulticastListener implements Runnable {
     // Username dell'utente per filtrare notifiche pertinenti
     private final String username;
 
-    /**
-     * Costruttore del listener multicast
-     *
-     * @param multicastAddress indirizzo del gruppo multicast (es: "230.0.0.1")
-     * @param multicastPort porta del gruppo multicast (es: 9876)
-     * @param username nome utente per filtrare le notifiche
-     */
+    //Costruttore del listener multicast
     public MulticastListener(String multicastAddress, int multicastPort, String username) {
         this.multicastAddress = multicastAddress;
         this.multicastPort = multicastPort;
@@ -46,12 +32,7 @@ public class MulticastListener implements Runnable {
         this.running = false;
     }
 
-    /**
-     * Avvia il listener multicast
-     * Crea socket, si unisce al gruppo multicast e inizia l'ascolto
-     *
-     * @throws Exception se errori nell'inizializzazione multicast
-     */
+    //Avvia il listener multicast
     public void start() throws Exception {
         try {
             // Crea MulticastSocket sulla porta specifica seguendo le slide
@@ -60,7 +41,7 @@ public class MulticastListener implements Runnable {
             // Ottiene riferimento al gruppo multicast
             group = InetAddress.getByName(multicastAddress);
 
-            // Si unisce al gruppo multicast (joinGroup dalle slide)
+            // Si unisce al gruppo multicast
             multicastSocket.joinGroup(group);
 
             running = true;
@@ -75,11 +56,7 @@ public class MulticastListener implements Runnable {
         }
     }
 
-    /**
-     * Main loop del thread - ascolta messaggi multicast in continuazione
-     * Implementa il pattern receive() delle slide multicast
-     */
-    @Override
+    //ascolta messaggi multicast in continuazione
     public void run() {
         byte[] buffer = new byte[1024]; // Buffer per messaggi multicast
 
@@ -87,7 +64,7 @@ public class MulticastListener implements Runnable {
 
         while (running && !Thread.currentThread().isInterrupted()) {
             try {
-                // Prepara pacchetto per ricezione (pattern delle slide)
+                // Prepara pacchetto per ricezione
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
 
                 // Riceve messaggio multicast (bloccante)
@@ -102,7 +79,6 @@ public class MulticastListener implements Runnable {
             } catch (Exception e) {
                 if (running) {
                     System.err.println("[MulticastListener] Errore ricezione multicast: " + e.getMessage());
-                    // Continua il loop - errori temporanei non fermano il listener
                 }
             }
         }
@@ -110,12 +86,7 @@ public class MulticastListener implements Runnable {
         System.out.println("[MulticastListener] Thread listener terminato");
     }
 
-    /**
-     * Processa un messaggio multicast ricevuto dal server
-     * Filtra e mostra solo notifiche pertinenti per questo utente
-     *
-     * @param jsonMessage messaggio JSON ricevuto via multicast
-     */
+    //Processa un messaggio multicast ricevuto dal server
     private void processMulticastMessage(String jsonMessage) {
         try {
             // Parsing JSON del messaggio multicast
@@ -143,17 +114,10 @@ public class MulticastListener implements Runnable {
         }
     }
 
-    /**
-     * Mostra notifica di soglia prezzo all'utente
-     * Formatta e presenta la notifica in modo user-friendly
-     *
-     * @param thresholdPrice soglia che è stata superata
-     * @param currentPrice prezzo corrente BTC
-     * @param message messaggio della notifica
-     */
+    //Mostra notifica di soglia prezzo all'utente
     private void displayPriceNotification(int thresholdPrice, int currentPrice, String message) {
         System.out.println("\n" + "=".repeat(60));
-        System.out.println("🚨 NOTIFICA PREZZO BTC 🚨");
+        System.out.println("NOTIFICA PREZZO BTC");
         System.out.println("=".repeat(60));
         System.out.println("Messaggio: " + message);
         System.out.println("Soglia registrata: " + formatPrice(thresholdPrice) + " USD");
@@ -163,10 +127,7 @@ public class MulticastListener implements Runnable {
         System.out.print(">> "); // Ripristina prompt per input utente
     }
 
-    /**
-     * Ferma il listener multicast in modo pulito
-     * Abbandona il gruppo multicast e chiude le risorse
-     */
+    //Ferma il listener multicast in modo pulito
     public void stop() {
         System.out.println("[MulticastListener] Fermando listener multicast...");
 
@@ -174,7 +135,7 @@ public class MulticastListener implements Runnable {
 
         try {
             if (multicastSocket != null) {
-                // Abbandona il gruppo multicast (leaveGroup dalle slide)
+                // Abbandona il gruppo multicast
                 if (group != null) {
                     multicastSocket.leaveGroup(group);
                 }
@@ -189,23 +150,12 @@ public class MulticastListener implements Runnable {
         }
     }
 
-    // === UTILITY METHODS ===
-
-    /**
-     * Formatta prezzo in millesimi per display user-friendly
-     *
-     * @param priceInMillis prezzo in millesimi USD
-     * @return prezzo formattato (es: "58.000")
-     */
+    //Formatta prezzo in millesimi per display user-friendly
     private String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    /**
-     * Verifica se il listener è attualmente in esecuzione
-     *
-     * @return true se il listener è attivo
-     */
+    //Verifica se il listener è attualmente in esecuzione
     public boolean isRunning() {
         return running;
     }
