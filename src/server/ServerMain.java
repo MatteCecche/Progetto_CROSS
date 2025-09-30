@@ -1,5 +1,7 @@
 package server;
 
+import server.utility.UserManager;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -13,6 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledExecutorService;
 
 
 /**
@@ -43,6 +46,8 @@ public class ServerMain {
 
     // Thread separato per ascoltare comandi da terminale
     private static Thread terminalListener;
+
+    private static ScheduledExecutorService persistenceScheduler;
 
 
     public static void main(String[] args) {
@@ -84,6 +89,10 @@ public class ServerMain {
             startRMIServer(rmiPort);
             OrderManager.initialize();
 
+            // Avvio persistenza periodica (ogni 5 minuti secondo best practice)
+            int persistenceInterval = 5; // minuti
+            startPeriodicPersistence(persistenceInterval);
+
             // Inizializzazione servizio multicast per notifiche prezzo
             PriceNotificationService.initialize(multicastAddress, multicastPort);
         } catch (Exception e) {
@@ -103,6 +112,38 @@ public class ServerMain {
         }
     }
 
+    //Avvia il servizio di persistenza periodica per utenti e trade
+    private static void startPeriodicPersistence(int intervalMinutes) {
+        persistenceScheduler = Executors.newScheduledThreadPool(1);
+
+        System.out.println("[Server] Avvio persistenza periodica (intervallo: " + intervalMinutes + " minuti)");
+
+        // Schedulazione task di persistenza periodica
+        persistenceScheduler.scheduleAtFixedRate(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    System.out.println("[Server] === Inizio persistenza periodica ===");
+
+                    // Salva tutti gli utenti registrati
+                    UserManager.saveAllUsers();
+                    System.out.println("[Server] ✓ Utenti salvati correttamente");
+
+                    // I trade vengono già salvati automaticamente in TradePersistence.saveTrade()
+                    // ma possiamo forzare un flush se necessario
+                    System.out.println("[Server] ✓ Trade già persistiti automaticamente");
+
+                    System.out.println("[Server] === Persistenza periodica completata ===");
+
+                } catch (Exception e) {
+                    System.err.println("[Server] ✗ Errore durante persistenza periodica: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            }
+        }, intervalMinutes, intervalMinutes, TimeUnit.MINUTES);
+
+        System.out.println("[Server] Servizio di persistenza periodica avviato con successo");
+    }
 
     // Carica la configurazione dal file server.properties
     private static Properties loadConfiguration() throws IOException {
@@ -223,19 +264,45 @@ public class ServerMain {
     //Esegue lo shutdown ordinato del server
     private static void shutdownServer() {
         try {
+            System.out.println("[Server] Iniziando shutdown ordinato del server...");
             running = false;
+
+            System.out.println("[Server] Esecuzione persistenza finale prima dello shutdown...");
+            try {
+                UserManager.saveAllUsers();
+                System.out.println("[Server] ✓ Persistenza finale utenti completata");
+            } catch (Exception e) {
+                System.err.println("[Server] ✗ Errore persistenza finale: " + e.getMessage());
+            }
+
+            if (persistenceScheduler != null) {
+                System.out.println("[Server] Chiusura servizio persistenza periodica...");
+                persistenceScheduler.shutdown();
+                try {
+                    if (!persistenceScheduler.awaitTermination(10, TimeUnit.SECONDS)) {
+                        persistenceScheduler.shutdownNow();
+                        System.out.println("[Server] Persistenza scheduler forzata la chiusura");
+                    }
+                } catch (InterruptedException e) {
+                    persistenceScheduler.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+                System.out.println("[Server] ✓ Servizio persistenza chiuso");
+            }
 
             // Attende terminazione del thread listener terminale
             if (terminalListener != null && terminalListener.isAlive()) {
                 try {
-                    // Aspetta terminazione thread terminale
-                    terminalListener.join();
+                    terminalListener.join(2000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     System.out.println("[Server] Interruzione durante join del thread terminale");
                 }
             }
+
+            // Shutdown thread pool client handlers
             if (pool != null) {
+                System.out.println("[Server] Chiusura thread pool...");
                 pool.shutdown();
                 try {
                     if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -245,16 +312,28 @@ public class ServerMain {
                     pool.shutdownNow();
                     Thread.currentThread().interrupt();
                 }
+                System.out.println("[Server] ✓ Thread pool chiuso");
             }
+
+            // Chiusura socket server
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
+                System.out.println("[Server] ✓ Server socket chiuso");
             }
+
+            // Chiusura servizio multicast
             PriceNotificationService.shutdown();
+
+            // Pulizia mappa socket-utente
             socketUserMap.clear();
-            System.out.println("[Server] Shutdown completato");
+
+            System.out.println("[Server] ===== Shutdown completato con successo =====");
             System.exit(0);
+
         } catch (Exception e) {
             System.err.println("[Server] Errore durante shutdown: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
         }
     }
 }

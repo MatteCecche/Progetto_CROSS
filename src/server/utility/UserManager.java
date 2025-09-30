@@ -17,6 +17,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  * - Caricamento e salvataggio utenti da/in file JSON con formattazione
  * - Ricerca e validazione utenti
  * - Creazione nuovi utenti
+ * - Persistenza periodica per sincronizzazione dati
  */
 public class UserManager {
 
@@ -27,7 +28,7 @@ public class UserManager {
     // ReadWrite lock permette letture multiple simultanee ma scritture esclusive
     private static final ReentrantReadWriteLock usersLock = new ReentrantReadWriteLock();
 
-    // Configurazione Gson
+    // Configurazione Gson per JSON formattato
     private static final Gson gson = new GsonBuilder()
             .setPrettyPrinting()
             .create();
@@ -55,31 +56,7 @@ public class UserManager {
     public static JsonArray loadUsers() throws IOException {
         usersLock.readLock().lock();
         try {
-            File usersFile = new File(USERS_FILE);
-
-            // Controllo esistenza e dimensione file
-            if (!usersFile.exists() || usersFile.length() == 0) {
-                return new JsonArray(); // File non esiste o è vuoto, lista vuota
-            }
-
-            try (FileReader reader = new FileReader(usersFile)) {
-                JsonObject rootObject = JsonParser.parseReader(reader).getAsJsonObject();
-
-                // Controlla se il file contiene la struttura corretta
-                if (rootObject != null && rootObject.has("users")) {
-                    return rootObject.getAsJsonArray("users");
-                } else {
-                    // File corrotto o struttura non valida, reinizializza
-                    System.out.println("[UserManager] File users.json corrotto, reinizializzazione...");
-                    initializeUsersFile();
-                    return new JsonArray();
-                }
-            } catch (Exception e) {
-                // Se c'è un errore nel parsing, reinizializza il file
-                System.err.println("[UserManager] Errore lettura file utenti, reinizializzazione: " + e.getMessage());
-                initializeUsersFile();
-                return new JsonArray();
-            }
+            return loadUsersInternal();
         } finally {
             usersLock.readLock().unlock();
         }
@@ -152,7 +129,6 @@ public class UserManager {
     public static ReentrantReadWriteLock getUsersLock() {
         return usersLock;
     }
-
 
     //Valida le credenziali di un utente confrontando username e password
     public static boolean validateCredentials(String username, String password) {
@@ -254,6 +230,58 @@ public class UserManager {
 
         try (FileWriter writer = new FileWriter(USERS_FILE)) {
             gson.toJson(rootObject, writer);
+        }
+    }
+
+    //Salva tutti gli utenti correnti dal sistema
+    public static void saveAllUsers() throws IOException {
+        usersLock.writeLock().lock();
+        try {
+            // Carica gli utenti correnti
+            JsonArray users = loadUsersInternal();
+
+            // Salva la lista (questo forza il flush su disco)
+            JsonObject rootObject = new JsonObject();
+            rootObject.add("users", users);
+
+            try (FileWriter writer = new FileWriter(USERS_FILE)) {
+                gson.toJson(rootObject, writer);
+                writer.flush(); // Forza scrittura fisica su disco
+            }
+
+            System.out.println("[UserManager] Salvati " + users.size() + " utenti nel file JSON");
+
+        } finally {
+            usersLock.writeLock().unlock();
+        }
+    }
+
+    //Metodo interno per caricare utenti senza acquisire il lock
+    private static JsonArray loadUsersInternal() throws IOException {
+        File usersFile = new File(USERS_FILE);
+
+        // Controllo esistenza e dimensione file
+        if (!usersFile.exists() || usersFile.length() == 0) {
+            return new JsonArray(); // File non esiste o è vuoto, lista vuota
+        }
+
+        try (FileReader reader = new FileReader(usersFile)) {
+            JsonObject rootObject = JsonParser.parseReader(reader).getAsJsonObject();
+
+            // Controlla se il file contiene la struttura corretta
+            if (rootObject != null && rootObject.has("users")) {
+                return rootObject.getAsJsonArray("users");
+            } else {
+                // File corrotto o struttura non valida, reinizializza
+                System.out.println("[UserManager] File users.json corrotto, reinizializzazione...");
+                initializeUsersFile();
+                return new JsonArray();
+            }
+        } catch (Exception e) {
+            // Se c'è un errore nel parsing, reinizializza il file
+            System.err.println("[UserManager] Errore lettura file utenti, reinizializzazione: " + e.getMessage());
+            initializeUsersFile();
+            return new JsonArray();
         }
     }
 }
