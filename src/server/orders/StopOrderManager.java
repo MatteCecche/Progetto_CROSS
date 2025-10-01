@@ -4,6 +4,8 @@ import server.OrderManager.Order;
 import server.utility.PriceCalculator;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import server.orders.MarketOrderManager;
+import server.orderbook.MatchingEngine;
 
 //Gestisce gli Stop Orders nel sistema CROSS
 public class StopOrderManager {
@@ -60,7 +62,7 @@ public class StopOrderManager {
     }
 
     //Controlla tutti gli Stop Orders e attiva quelli che soddisfano le condizioni
-    public static List<Order> checkAndActivateStopOrders(int newMarketPrice, MarketOrderExecutor marketOrderExecutor) {
+    public static List<Order> checkAndActivateStopOrders(int newMarketPrice, MatchingEngine.TradeExecutor tradeExecutor) {
         List<Order> activatedOrders = new ArrayList<>();
 
         // Identifica Stop Orders da attivare
@@ -74,7 +76,7 @@ public class StopOrderManager {
 
         // Attiva tutti gli Stop Orders identificati
         for (Order stopOrder : toActivate) {
-            activateStopOrder(stopOrder, marketOrderExecutor);
+            activateStopOrder(stopOrder, tradeExecutor);
             activatedOrders.add(stopOrder);
         }
 
@@ -105,7 +107,7 @@ public class StopOrderManager {
     }
 
     //Attiva un singolo Stop Order convertendolo in Market Order
-    private static void activateStopOrder(Order stopOrder, MarketOrderExecutor marketOrderExecutor) {
+    private static void activateStopOrder(Order stopOrder, MatchingEngine.TradeExecutor tradeExecutor) {
         // Rimuovi dallo storage Stop Orders
         stopOrders.remove(stopOrder.getOrderId());
 
@@ -113,22 +115,13 @@ public class StopOrderManager {
                 " attivato come Market Order - " + stopOrder.getType().toUpperCase() +
                 " " + PriceCalculator.formatSize(stopOrder.getRemainingSize()) + " BTC");
 
-        // Esegui come Market Order tramite callback
-        if (marketOrderExecutor != null) {
-            marketOrderExecutor.executeMarketOrder(stopOrder);
+        // Esegui come Market Order tramite MarketOrderManager
+        if (tradeExecutor != null) {
+            MarketOrderManager.insertMarketOrder(stopOrder, tradeExecutor);
         } else {
-            System.err.println("[StopOrderManager] ERRORE: MarketOrderExecutor è null - " +
+            System.err.println("[StopOrderManager] ERRORE: TradeExecutor è null - " +
                     "impossibile eseguire Stop Order " + stopOrder.getOrderId());
         }
-    }
-
-
-    //Interface per callback di esecuzione Market Orders
-    @FunctionalInterface
-    public interface MarketOrderExecutor {
-
-        //Esegue un Market Order derivato da Stop Order attivato
-        void executeMarketOrder(Order stopOrderToExecute);
     }
 
 

@@ -17,6 +17,8 @@ import server.orderbook.OrderBook;
 import server.orders.StopOrderManager;
 import server.orderbook.MatchingEngine;
 import java.util.stream.Collectors;
+import server.orders.LimitOrderManager;
+import server.orders.MarketOrderManager;
 
 /**
  * - Interfacce pubbliche per inserimento ordini (Limit, Market, Stop)
@@ -103,10 +105,9 @@ public class OrderManager {
     //Inserisce un Limit Order nel sistema
     public static int insertLimitOrder(String username, String type, int size, int price) {
         try {
-            // Validazione parametri di input
+            // Validazione parametri
             if (!isValidOrderType(type) || size <= 0 || price <= 0) {
-                System.err.println("[OrderManager] Parametri Limit Order non validi: type=" + type +
-                        ", size=" + size + ", price=" + price);
+                System.err.println("[OrderManager] Parametri Limit Order non validi");
                 return -1;
             }
 
@@ -114,18 +115,15 @@ public class OrderManager {
             Order order = new Order(username, type, "limit", size, price, 0);
             allOrders.put(order.getOrderId(), order);
 
-            System.out.println("[OrderManager] Creato Limit Order " + order.getOrderId() +
-                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC @ " + PriceCalculator.formatPrice(price) + " USD");
+            System.out.println("[OrderManager] Creato Limit Order " + order.getOrderId());
 
-            // Inserimento nell'order book appropriato
-            if ("bid".equals(type)) {
-                OrderBook.addToBidBook(order);
-            } else {
-                OrderBook.addToAskBook(order);
+            // Delega a LimitOrderManager
+            boolean success = LimitOrderManager.insertLimitOrder(order, OrderManager::executeTrade);
+
+            if (!success) {
+                allOrders.remove(order.getOrderId());
+                return -1;
             }
-
-            // Tentativo di matching immediato
-            MatchingEngine.performLimitOrderMatching(OrderManager::executeTrade);
 
             return order.getOrderId();
 
@@ -141,14 +139,7 @@ public class OrderManager {
         try {
             // Validazione parametri
             if (!isValidOrderType(type) || size <= 0) {
-                System.err.println("[OrderManager] Parametri Market Order non validi: type=" + type + ", size=" + size);
-                return -1;
-            }
-
-            // Controllo disponibilità liquidità nel lato opposto dell'order book
-            if (!OrderBook.hasLiquidity(type, size)) {
-                System.err.println("[OrderManager] Market Order rifiutato: liquidità insufficiente per " +
-                        PriceCalculator.formatSize(size) + " BTC " + type);
+                System.err.println("[OrderManager] Parametri Market Order non validi");
                 return -1;
             }
 
@@ -156,11 +147,15 @@ public class OrderManager {
             Order marketOrder = new Order(username, type, "market", size, 0, 0);
             allOrders.put(marketOrder.getOrderId(), marketOrder);
 
-            System.out.println("[OrderManager] Esecuzione Market Order " + marketOrder.getOrderId() +
-                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC al prezzo di mercato");
+            System.out.println("[OrderManager] Creato Market Order " + marketOrder.getOrderId());
 
-            // Esecuzione immediata contro order book
-            MatchingEngine.executeMarketOrder(marketOrder, OrderManager::executeTrade);
+            // Delega a MarketOrderManager
+            boolean success = MarketOrderManager.insertMarketOrder(marketOrder, OrderManager::executeTrade);
+
+            if (!success) {
+                allOrders.remove(marketOrder.getOrderId());
+                return -1;
+            }
 
             return marketOrder.getOrderId();
 
@@ -402,8 +397,7 @@ public class OrderManager {
             }
 
             // Controlla e attiva eventuali Stop Orders
-            StopOrderManager.checkAndActivateStopOrders(currentMarketPrice,
-                    stopOrder -> MatchingEngine.executeMarketOrder(stopOrder, OrderManager::executeTrade));
+            StopOrderManager.checkAndActivateStopOrders(currentMarketPrice, OrderManager::executeTrade);
 
             try {
                 int tradeId = OrderIdGenerator.getNextOrderId();
@@ -425,10 +419,4 @@ public class OrderManager {
     public static int getCurrentMarketPrice() {
         return currentMarketPrice;
     }
-
-    //Metodo pubblico per eseguire Market Orders (usato da StopOrderManager)
-    public static void executeMarketOrder(Order marketOrder) {
-        MatchingEngine.executeMarketOrder(marketOrder, OrderManager::executeTrade);
-    }
-
 }
