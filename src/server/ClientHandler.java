@@ -14,6 +14,8 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.util.concurrent.ConcurrentHashMap;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 
 /**
  * Gestisce la comunicazione con un singolo client TCP del sistema CROSS
@@ -174,6 +176,21 @@ public class ClientHandler implements Runnable {
 
             // Login completato
             socketUserMap.put(clientSocket, username);
+
+            // Registra client per notifiche UDP trade
+            if (values.has("udpPort")) {
+                try {
+                    int udpPort = values.get("udpPort").getAsInt();
+                    InetAddress clientIP = clientSocket.getInetAddress();
+                    UDPNotificationService.registerClient(
+                            username,
+                            new InetSocketAddress(clientIP, udpPort)
+                    );
+                } catch (Exception e) {
+                    System.err.println("[ClientHandler] Errore registrazione UDP: " + e.getMessage());
+                }
+            }
+
             System.out.println("[ClientHandler] Login successful: " + username);
 
             return ResponseBuilder.Login.success();
@@ -577,6 +594,7 @@ public class ClientHandler implements Runnable {
             // Rimuovi utente dalle notifiche multicast se era loggato
             if (loggedUsername != null) {
                 PriceNotificationService.unregisterUser(loggedUsername);
+                UDPNotificationService.unregisterClient(loggedUsername);
             }
 
             // Rimuovi dalla mappa degli utenti loggati

@@ -56,6 +56,11 @@ public class ClientMain {
     // Thread per listener multicast
     private static Thread multicastThread;
 
+    // Listener UDP per notifiche trade
+    private static UDPNotificationListener udpListener;
+    private static Thread udpListenerThread;
+    private static int udpNotificationPort;
+
     // Username dell'utente attualmente loggato
     private static String currentLoggedUsername;
 
@@ -91,6 +96,7 @@ public class ClientMain {
             socketTimeout = parseRequiredIntProperty(config, "socket.timeout");
             multicastAddress = parseRequiredStringProperty(config, "multicast.address");
             multicastPort = parseRequiredIntProperty(config, "multicast.port");
+            udpNotificationPort = parseRequiredIntProperty(config, "UDP.notification.port");
 
         } catch (IllegalArgumentException e) {
             System.err.println("[Client] Errore nel parsing dei parametri: " + e.getMessage());
@@ -347,6 +353,7 @@ public class ClientMain {
             JsonObject values = new JsonObject();
             values.addProperty("username", username);
             values.addProperty("password", password);
+            values.addProperty("udpPort", udpNotificationPort); // Comunica porta UDP al server
             request.add("values", values);
 
             // Invio richiesta
@@ -404,6 +411,7 @@ public class ClientMain {
 
             // Avvia listener multicast dopo login successful
             startMulticastListener();
+            startUDPListener();
 
         } catch (Exception e) {
             System.err.println("[Client] Errore durante login: " + e.getMessage());
@@ -421,6 +429,9 @@ public class ClientMain {
 
             // Ferma listener multicast prima del logout
             stopMulticastListener();
+
+            // Ferma listener UDP
+            stopUDPListener();
 
             // Creazione richiesta JSON di logout
             JsonObject request = new JsonObject();
@@ -1150,6 +1161,61 @@ public class ClientMain {
         }
     }
 
+
+    /**
+     * Avvia il listener UDP per ricevere notifiche trade dal server
+     */
+    private static void startUDPListener() {
+        try {
+            if (udpListener == null && currentLoggedUsername != null) {
+
+                // Crea e avvia listener UDP
+                udpListener = new UDPNotificationListener(udpNotificationPort, currentLoggedUsername);
+                udpListener.start();
+
+                // Avvia thread separato per listener
+                udpListenerThread = new Thread(udpListener, "UDP-Notification-Listener-" + currentLoggedUsername);
+                udpListenerThread.setDaemon(true); // Thread daemon per non bloccare shutdown
+                udpListenerThread.start();
+
+                System.out.println("[Client] Listener UDP avviato per notifiche trade sulla porta " + udpNotificationPort);
+            }
+        } catch (Exception e) {
+            System.err.println("[Client] Errore avvio listener UDP: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Ferma il listener UDP
+     */
+    private static void stopUDPListener() {
+        try {
+            if (udpListener != null) {
+                udpListener.stop();
+
+                if (udpListenerThread != null && udpListenerThread.isAlive()) {
+                    udpListenerThread.interrupt();
+
+                    // Aspetta terminazione thread per max 2 secondi
+                    try {
+
+                        udpListenerThread.join(2000);
+                    } catch (InterruptedException e) {
+
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                udpListener = null;
+                udpListenerThread = null;
+
+                System.out.println("[Client] Listener UDP fermato");
+            }
+        } catch (Exception e) {
+            System.err.println("[Client] Errore durante stop listener UDP: " + e.getMessage());
+        }
+    }
+
+
     //Formatta volume in formato leggibile
     private static String formatVolume(int volumeInMillis) {
         return String.format("%.3f BTC", volumeInMillis / 1000.0);
@@ -1168,6 +1234,9 @@ public class ClientMain {
 
         // Ferma listener multicast
         stopMulticastListener();
+
+        // Ferma listener UDP
+        stopUDPListener();
 
         // Chiusura connessioni TCP
         try {

@@ -17,7 +17,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ScheduledExecutorService;
 
-
 /**
  * Classe Main del server CROSS
  * Implementa un server multithreaded che gestisce:
@@ -95,6 +94,10 @@ public class ServerMain {
 
             // Inizializzazione servizio multicast per notifiche prezzo
             PriceNotificationService.initialize(multicastAddress, multicastPort);
+
+            // Inizializzazione servizio UDP per notifiche trade
+            UDPNotificationService.initialize();
+
         } catch (Exception e) {
             System.err.println("[Server] Errore avvio servizi: " + e.getMessage());
             e.printStackTrace();
@@ -323,6 +326,9 @@ public class ServerMain {
 
             // Chiusura servizio multicast
             PriceNotificationService.shutdown();
+
+            // Chiusura servizio notifica UDP
+            UDPNotificationService.shutdown();
 
             // Pulizia mappa socket-utente
             socketUserMap.clear();

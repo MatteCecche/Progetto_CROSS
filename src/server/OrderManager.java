@@ -396,6 +396,16 @@ public class OrderManager {
                 PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
             }
 
+            // Invia notifiche UDP agli utenti coinvolti (best effort)
+            try {
+                UDPNotificationService.notifyTradeExecution(
+                        bidOrder, askOrder, tradeSize, executionPrice
+                );
+            } catch (Exception e) {
+                // Best effort: errore nelle notifiche non blocca il trade
+                System.err.println("[OrderManager] Errore invio notifiche UDP: " + e.getMessage());
+            }
+
             // Controlla e attiva eventuali Stop Orders
             StopOrderManager.checkAndActivateStopOrders(currentMarketPrice, OrderManager::executeTrade);
 
