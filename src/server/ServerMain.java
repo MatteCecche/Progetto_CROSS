@@ -19,13 +19,17 @@ import java.util.concurrent.ScheduledExecutorService;
 
 /**
  * Classe Main del server CROSS
- * Implementa un server multithreaded che gestisce:
+ *
+ * Server multithreaded che gestisce:
  * - Registrazioni via RMI
- * - Login e operazioni via TCP
- * - Thread pool per gestire client
- * - Servizio multicast per notifiche prezzo
- * - Thread per ascoltare il comando "esci" da terminale
- * - Mappa socket-utente
+ * - Login e altre operazioni via TCP
+ * - Order Book con matching time/price priority
+ * - Thread pool per client concorrenti
+ * - Notifiche multicast per soglie prezzo
+ * - Notifiche UDP per trade eseguiti
+ * - Persistenza periodica dati
+ * - Shutdown controllato
+ *
  */
 
 
@@ -46,6 +50,7 @@ public class ServerMain {
     // Thread separato per ascoltare comandi da terminale
     private static Thread terminalListener;
 
+    // ScheduledExecutorService per esecuzione periodica del salvataggio dati
     private static ScheduledExecutorService persistenceScheduler;
 
 
@@ -88,8 +93,8 @@ public class ServerMain {
             startRMIServer(rmiPort);
             OrderManager.initialize();
 
-            // Avvio persistenza periodica (ogni 5 minuti secondo best practice)
-            int persistenceInterval = 5; // minuti
+            // Avvio persistenza periodica
+            int persistenceInterval = 1;
             startPeriodicPersistence(persistenceInterval);
 
             // Inizializzazione servizio multicast per notifiche prezzo
@@ -119,33 +124,19 @@ public class ServerMain {
     private static void startPeriodicPersistence(int intervalMinutes) {
         persistenceScheduler = Executors.newScheduledThreadPool(1);
 
-        System.out.println("[Server] Avvio persistenza periodica (intervallo: " + intervalMinutes + " minuti)");
-
         // Schedulazione task di persistenza periodica
         persistenceScheduler.scheduleAtFixedRate(new Runnable() {
-            @Override
+
             public void run() {
                 try {
-                    System.out.println("[Server] === Inizio persistenza periodica ===");
-
                     // Salva tutti gli utenti registrati
                     UserManager.saveAllUsers();
-                    System.out.println("[Server] ✓ Utenti salvati correttamente");
-
-                    // I trade vengono già salvati automaticamente in TradePersistence.saveTrade()
-                    // ma possiamo forzare un flush se necessario
-                    System.out.println("[Server] ✓ Trade già persistiti automaticamente");
-
-                    System.out.println("[Server] === Persistenza periodica completata ===");
-
                 } catch (Exception e) {
-                    System.err.println("[Server] ✗ Errore durante persistenza periodica: " + e.getMessage());
+                    System.err.println("[Server] Errore durante persistenza periodica: " + e.getMessage());
                     e.printStackTrace();
                 }
             }
         }, intervalMinutes, intervalMinutes, TimeUnit.MINUTES);
-
-        System.out.println("[Server] Servizio di persistenza periodica avviato con successo");
     }
 
     // Carica la configurazione dal file server.properties
@@ -200,7 +191,9 @@ public class ServerMain {
     private static void startTCPServer(int tcpPort, int socketTimeout) throws IOException {
         pool = Executors.newCachedThreadPool();
         serverSocket = new ServerSocket(tcpPort);
-        serverSocket.setSoTimeout(1000); // 1 secondo di timeout
+
+        // 1 secondo di timeout
+        serverSocket.setSoTimeout(1000);
 
         // Avvia thread separato per ascolto comandi da terminale
         terminalListener = new Thread(new Runnable() {
@@ -267,30 +260,24 @@ public class ServerMain {
     //Esegue lo shutdown ordinato del server
     private static void shutdownServer() {
         try {
-            System.out.println("[Server] Iniziando shutdown ordinato del server...");
             running = false;
-
-            System.out.println("[Server] Esecuzione persistenza finale prima dello shutdown...");
             try {
                 UserManager.saveAllUsers();
-                System.out.println("[Server] ✓ Persistenza finale utenti completata");
+                System.out.println("[Server] Persistenza finale utenti completata");
             } catch (Exception e) {
-                System.err.println("[Server] ✗ Errore persistenza finale: " + e.getMessage());
+                System.err.println("[Server] Errore persistenza finale: " + e.getMessage());
             }
 
             if (persistenceScheduler != null) {
-                System.out.println("[Server] Chiusura servizio persistenza periodica...");
                 persistenceScheduler.shutdown();
                 try {
                     if (!persistenceScheduler.awaitTermination(10, TimeUnit.SECONDS)) {
                         persistenceScheduler.shutdownNow();
-                        System.out.println("[Server] Persistenza scheduler forzata la chiusura");
                     }
                 } catch (InterruptedException e) {
                     persistenceScheduler.shutdownNow();
                     Thread.currentThread().interrupt();
                 }
-                System.out.println("[Server] ✓ Servizio persistenza chiuso");
             }
 
             // Attende terminazione del thread listener terminale
@@ -305,7 +292,6 @@ public class ServerMain {
 
             // Shutdown thread pool client handlers
             if (pool != null) {
-                System.out.println("[Server] Chiusura thread pool...");
                 pool.shutdown();
                 try {
                     if (!pool.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -315,13 +301,11 @@ public class ServerMain {
                     pool.shutdownNow();
                     Thread.currentThread().interrupt();
                 }
-                System.out.println("[Server] ✓ Thread pool chiuso");
             }
 
             // Chiusura socket server
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
-                System.out.println("[Server] ✓ Server socket chiuso");
             }
 
             // Chiusura servizio multicast

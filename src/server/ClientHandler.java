@@ -25,9 +25,6 @@ import java.net.InetSocketAddress;
  * - Sistema di trading completo con OrderManager integration
  * - Registrazione notifiche prezzo multicast
  * - Sincronizzazione con la mappa globale socket-utente per stato login
- *
- * Utilizza UserManager per tutte le operazioni sui dati utenti,
- * garantendo centralizzazione e consistenza della logica di persistenza.
  */
 public class ClientHandler implements Runnable {
 
@@ -45,6 +42,9 @@ public class ClientHandler implements Runnable {
 
     // Riferimento alla mappa condivisa socket -> username
     private ConcurrentHashMap<Socket, String> socketUserMap;
+
+    // Salva l'ultimo username loggato per il cleanup
+    private String lastLoggedUsername = null;
 
     //Configura tutte le risorse necessarie per la gestione del client
     public ClientHandler(Socket clientSocket, ConcurrentHashMap<Socket, String> socketUserMap) {
@@ -177,6 +177,9 @@ public class ClientHandler implements Runnable {
             // Login completato
             socketUserMap.put(clientSocket, username);
 
+            // Salva il nome per il cleanup
+            lastLoggedUsername = username;
+
             // Registra client per notifiche UDP trade
             if (values.has("udpPort")) {
                 try {
@@ -212,8 +215,14 @@ public class ClientHandler implements Runnable {
 
             System.out.println("[ClientHandler] Processando logout per: " + loggedUsername);
 
+            // Rimuovi dalla mappa
+            socketUserMap.remove(clientSocket);
+
             // Rimuovi utente dalle notifiche multicast prima del logout
             PriceNotificationService.unregisterUser(loggedUsername);
+
+            // Rimuovi dalle notifiche UDP
+            UDPNotificationService.unregisterClient(loggedUsername);
 
             System.out.println("[ClientHandler] Logout successful: " + loggedUsername);
             return ResponseBuilder.Logout.success();
@@ -252,8 +261,8 @@ public class ClientHandler implements Runnable {
             }
 
             // Aggiornamento tramite UserManager
-            boolean success = UserManager.updatePassword(username, oldPassword, newPassword);
-            if (success) {
+            int success = UserManager.updatePassword(username, oldPassword, newPassword);
+            if (success == 100) {
                 System.out.println("[ClientHandler] Password aggiornata per utente: " + username);
                 return ResponseBuilder.UpdateCredentials.success();
             } else {
@@ -558,13 +567,6 @@ public class ClientHandler implements Runnable {
         return response;
     }
 
-    //Crea risposta di errore per operazioni ordini
-    private JsonObject createOrderErrorResponse(String errorMessage) {
-        JsonObject response = new JsonObject();
-        response.addProperty("orderId", -1);
-        return response;
-    }
-
     //Invia risposta JSON al client
     private void sendResponse(JsonObject response) {
         out.println(response.toString());
@@ -575,11 +577,7 @@ public class ClientHandler implements Runnable {
         sendResponse(createErrorResponse(code, message));
     }
 
-    /**
-     * Cleanup delle risorse del client
-     * Rimuove utente dalla mappa degli utenti loggati e dalle notifiche multicast
-     * Chiude stream e socket
-     */
+    //Rimuove utente dalla mappa degli utenti loggati e dalle notifiche multicast
     private void cleanup() {
         try {
             // Salva il nome utente PRIMA di rimuoverlo dalla mappa
@@ -587,9 +585,15 @@ public class ClientHandler implements Runnable {
             String userInfo;
             if (loggedUsername != null) {
                 userInfo = loggedUsername;
-            } else {
-                userInfo = "anonymous";
-            }
+                PriceNotificationService.unregisterUser(loggedUsername);
+                UDPNotificationService.unregisterClient(loggedUsername);
+            } else if (lastLoggedUsername != null) {
+            // logout esplicito fatto
+            userInfo = lastLoggedUsername;
+        } else {
+            // Nessun login mai fatto
+            userInfo = "anonymous";
+        }
 
             // Rimuovi utente dalle notifiche multicast se era loggato
             if (loggedUsername != null) {

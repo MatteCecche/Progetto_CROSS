@@ -7,23 +7,17 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.net.MulticastSocket;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Servizio multicast UDP per notifiche di soglie di prezzo BTC
- * Funzionalità specifica per studenti del vecchio ordinamento secondo le specifiche del progetto
- *
  * - Gestisce registrazioni utenti per notifiche di soglia prezzo
  * - Monitora variazioni del prezzo di mercato BTC
  * - Invia notifiche multicast UDP quando soglie vengono superate
- * - Utilizza strutture thread-safe per accessi concorrenti
- *
- * Implementa il pattern delle slide multicast: MulticastSocket, InetAddress, DatagramPacket
  */
 public class PriceNotificationService {
 
-    // Configurazione multicast - letta da file properties secondo specifiche progetto
+    // Configurazione multicast
     private static String MULTICAST_ADDRESS;
     private static int MULTICAST_PORT;
 
@@ -33,7 +27,7 @@ public class PriceNotificationService {
     // Indirizzo del gruppo multicast
     private static InetAddress multicastGroup;
 
-    // Mappa thread-safe: username -> soglia prezzo interessata (in millesimi USD)
+    // Mappa thread-safe: username -> soglia prezzo interessata
     private static final ConcurrentHashMap<String, Integer> userThresholds = new ConcurrentHashMap<>();
 
     // Gson per serializzazione messaggi JSON
@@ -46,14 +40,12 @@ public class PriceNotificationService {
             MULTICAST_ADDRESS = multicastAddress;
             MULTICAST_PORT = multicastPort;
 
-            // Crea socket per invio messaggi multicast (server side)
+            // Crea socket per invio messaggi multicast
             multicastSender = new DatagramSocket();
 
             // Imposta indirizzo del gruppo multicast
             multicastGroup = InetAddress.getByName(MULTICAST_ADDRESS);
 
-            System.out.println("[PriceNotificationService] Servizio multicast inizializzato");
-            System.out.println("[PriceNotificationService] Gruppo multicast: " + MULTICAST_ADDRESS + ":" + MULTICAST_PORT);
 
         } catch (Exception e) {
             System.err.println("[PriceNotificationService] Errore inizializzazione multicast: " + e.getMessage());

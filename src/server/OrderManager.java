@@ -15,18 +15,20 @@ import server.utility.TradePersistence;
 import server.utility.PriceCalculator;
 import server.orderbook.OrderBook;
 import server.orders.StopOrderManager;
-import server.orderbook.MatchingEngine;
-import java.util.stream.Collectors;
 import server.orders.LimitOrderManager;
 import server.orders.MarketOrderManager;
 
 /**
+ * Coordinatore centrale del sistema di trading CROSS.
  * - Interfacce pubbliche per inserimento ordini (Limit, Market, Stop)
  * - Coordinamento tra componenti specializzati
  * - Gestione stato generale del sistema (prezzo corrente, allOrders)
  * - Storico prezzi OHLC per analisi mensili
  * - Esecuzione trade con persistenza e notifiche
  * - Inizializzazione sistema completo
+ * - Notifiche multicast UDP per soglie prezzo
+ * - Notifiche UDP best-effort per trade
+ * - Storico OHLC mensile
  */
 public class OrderManager {
 
@@ -36,10 +38,7 @@ public class OrderManager {
     // Prezzo corrente di mercato (ultimo trade eseguito)
     private static volatile int currentMarketPrice = 58000000; // Default: 58.000 USD
 
-    /**
-     * Classe interna che rappresenta un ordine nel sistema CROSS
-     * Contiene tutti i dati necessari per gestione order book e matching
-     */
+    //Classe interna che rappresenta un ordine nel sistema CROSS.
     public static class Order {
         private final int orderId;
         private final String username;
@@ -47,10 +46,11 @@ public class OrderManager {
         private final String orderType;   // "limit", "market", "stop"
         private final int size;           // Quantità in millesimi di BTC
         private final int price;          // Prezzo in millesimi di USD (0 per market orders)
-        private final int stopPrice;     // Stop price per stop orders (0 per altri)
-        private final long timestamp;    // Timestamp per time priority
-        private int remainingSize;       // Size rimanente (per matching parziali)
+        private final int stopPrice;      // Stop price per stop orders (0 per altri)
+        private final long timestamp;     // Timestamp per time priority
+        private int remainingSize;        // Size rimanente (per matching parziali)
 
+        //Costruisce un nuovo ordine con ID auto-generato.
         public Order(String username, String type, String orderType, int size, int price, int stopPrice) {
             this.orderId = OrderIdGenerator.getNextOrderId();
             this.username = username;
@@ -72,35 +72,33 @@ public class OrderManager {
         public int getPrice() { return price; }
         public int getStopPrice() { return stopPrice; }
         public long getTimestamp() { return timestamp; }
+
+        //Ottiene la quantità rimanente dell'ordine
         public synchronized int getRemainingSize() { return remainingSize; }
 
+        //Imposta la quantità rimanente dell'ordine
         public synchronized void setRemainingSize(int remaining) {
             this.remainingSize = remaining;
         }
 
+        //Verifica se l'ordine è stato completamente eseguito
         public synchronized boolean isFullyExecuted() {
             return remainingSize <= 0;
         }
     }
 
-    //Verifica/crea il file unificato e inizializza il generatore orderID
+    //Inizializza il sistema di gestione ordini
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            System.out.println("[OrderManager] Errore: directory data non presente");
-            System.exit(1);
+            throw new IOException("[OrderManager] Errore: Directory 'data/' non trovata!\n");
         }
-
         // Inizializza persistenza trade
         TradePersistence.initialize();
 
         // Inizializza il generatore di orderID
         OrderIdGenerator.initialize();
-
-        System.out.println("[OrderManager] Sistema gestione ordini inizializzato");
-        System.out.println("[OrderManager] Prezzo corrente BTC: " + PriceCalculator.formatPrice(currentMarketPrice) + " USD");
     }
-
 
     //Inserisce un Limit Order nel sistema
     public static int insertLimitOrder(String username, String type, int size, int price) {
@@ -117,7 +115,7 @@ public class OrderManager {
 
             System.out.println("[OrderManager] Creato Limit Order " + order.getOrderId());
 
-            // Delega a LimitOrderManager
+            // Delega a LimitOrderManager con callback per esecuzione trade
             boolean success = LimitOrderManager.insertLimitOrder(order, OrderManager::executeTrade);
 
             if (!success) {
@@ -133,8 +131,7 @@ public class OrderManager {
         }
     }
 
-    //Inserisce un Market Order nel sistema (esecuzione immediata)
-
+    //Inserisce un Market Order nel sistema con esecuzione immediata
     public static int insertMarketOrder(String username, String type, int size) {
         try {
             // Validazione parametri
@@ -149,7 +146,7 @@ public class OrderManager {
 
             System.out.println("[OrderManager] Creato Market Order " + marketOrder.getOrderId());
 
-            // Delega a MarketOrderManager
+            // Delega a MarketOrderManager con callback per esecuzione trade
             boolean success = MarketOrderManager.insertMarketOrder(marketOrder, OrderManager::executeTrade);
 
             if (!success) {
@@ -178,7 +175,8 @@ public class OrderManager {
             // Validazione logica stop price vs prezzo corrente
             if (!StopOrderManager.isValidStopPrice(type, stopPrice, currentMarketPrice)) {
                 System.err.println("[OrderManager] Stop Price non valido per " + type +
-                        ": " + PriceCalculator.formatPrice(stopPrice) + " (prezzo corrente: " + PriceCalculator.formatPrice(currentMarketPrice) + ")");
+                        ": " + PriceCalculator.formatPrice(stopPrice) + " (prezzo corrente: " +
+                        PriceCalculator.formatPrice(currentMarketPrice) + ")");
                 return -1;
             }
 
@@ -188,7 +186,8 @@ public class OrderManager {
             StopOrderManager.addStopOrder(stopOrder);
 
             System.out.println("[OrderManager] Creato Stop Order " + stopOrder.getOrderId() +
-                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) + " BTC @ stop " + PriceCalculator.formatPrice(stopPrice) + " USD");
+                    " - " + username + " " + type + " " + PriceCalculator.formatSize(size) +
+                    " BTC @ stop " + PriceCalculator.formatPrice(stopPrice) + " USD");
 
             return stopOrder.getOrderId();
 
@@ -209,15 +208,17 @@ public class OrderManager {
                 return 101;
             }
 
-            // Controllo
+            // Controllo ownership
             if (!order.getUsername().equals(username)) {
-                System.err.println("[OrderManager] Cancel fallito: ordine " + orderId + " appartiene a " + order.getUsername());
+                System.err.println("[OrderManager] Cancel fallito: ordine " + orderId +
+                        " appartiene a " + order.getUsername());
                 return 101;
             }
 
             // Controllo se ordine già eseguito completamente
             if (order.isFullyExecuted()) {
-                System.err.println("[OrderManager] Cancel fallito: ordine " + orderId + " già completamente eseguito");
+                System.err.println("[OrderManager] Cancel fallito: ordine " + orderId +
+                        " già completamente eseguito");
                 return 101;
             }
 
@@ -240,7 +241,7 @@ public class OrderManager {
         }
     }
 
-    //Implementa getPriceHistory
+    //Genera storico prezzi OHLC (Open/High/Low/Close) per un mese specifico
     public static JsonObject getPriceHistory(String monthYear) {
         try {
             // Validazione formato input
@@ -250,7 +251,6 @@ public class OrderManager {
                 return error;
             }
 
-            JsonArray allRecords = TradePersistence.loadTrades();
             String month = monthYear.substring(0, 2);
             String year = monthYear.substring(2, 6);
 
@@ -260,6 +260,7 @@ public class OrderManager {
                 monthInt = Integer.parseInt(month);
                 yearInt = Integer.parseInt(year);
 
+                // Validazione mese (1-12)
                 if (monthInt < 1 || monthInt > 12) {
                     throw new NumberFormatException("Mese deve essere tra 01 e 12");
                 }
@@ -270,14 +271,14 @@ public class OrderManager {
             }
 
             // Carica tutti i record dal file
-            JsonArray records = TradePersistence.loadTrades();
+            JsonArray allRecords = TradePersistence.loadTrades();
 
             if (allRecords.size() == 0) {
                 JsonObject response = new JsonObject();
                 response.addProperty("month", monthYear);
                 response.addProperty("totalDays", 0);
                 response.add("priceHistory", new JsonArray());
-                response.addProperty("message", "Nessun record trovato nel file ");
+                response.addProperty("message", "Nessun record trovato nel file");
                 return response;
             }
 
@@ -296,7 +297,7 @@ public class OrderManager {
                 }
 
                 try {
-                    // Converti timestamp UNIX a LocalDate (GMT come da specifiche)
+                    // Converti timestamp UNIX a LocalDate
                     long timestamp = record.get("timestamp").getAsLong();
                     LocalDate tradeDate = Instant.ofEpochSecond(timestamp)
                             .atZone(ZoneId.of("GMT"))
@@ -340,19 +341,15 @@ public class OrderManager {
             // Calcola OHLC per ogni giorno
             JsonArray historyData = new JsonArray();
 
-            List<String> sortedDates = tradesByDay.keySet().stream()
+            // Ordina date e calcola OHLC per ciascuna
+            tradesByDay.keySet().stream()
                     .sorted()
-                    .collect(Collectors.toList());
-
-            // Calcola OHLC per ogni giorno usando PriceCalculator
-            for (Map.Entry<String, List<JsonObject>> dayEntry : tradesByDay.entrySet()) {
-                String date = dayEntry.getKey();
-                List<JsonObject> dayTrades = dayEntry.getValue();
-
-                // Usa PriceCalculator per calcolare OHLC del giorno
-                JsonObject dayData = PriceCalculator.calculateDayOHLC(dayTrades, date);
-                historyData.add(dayData);
-            }
+                    .forEach(date -> {
+                        List<JsonObject> dayTrades = tradesByDay.get(date);
+                        // Usa PriceCalculator per calcolare OHLC del giorno
+                        JsonObject dayData = PriceCalculator.calculateDayOHLC(dayTrades, date);
+                        historyData.add(dayData);
+                    });
 
             // Crea risposta finale conforme alle specifiche
             JsonObject response = new JsonObject();
@@ -381,7 +378,8 @@ public class OrderManager {
     private static void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
             System.out.println("[OrderManager] TRADE ESEGUITO: " +
-                    PriceCalculator.formatSize(tradeSize) + " BTC @ " + PriceCalculator.formatPrice(executionPrice) + " USD " +
+                    PriceCalculator.formatSize(tradeSize) + " BTC @ " +
+                    PriceCalculator.formatPrice(executionPrice) + " USD " +
                     "(Bid: " + bidOrder.getOrderId() + ", Ask: " + askOrder.getOrderId() + ")");
 
             // Aggiorna prezzo di mercato con il prezzo dell'ultimo trade
@@ -390,25 +388,28 @@ public class OrderManager {
 
             // Log cambio prezzo se significativo
             if (oldPrice != currentMarketPrice) {
-                System.out.println("[OrderManager] Prezzo aggiornato: " + PriceCalculator.formatPrice(oldPrice) + " → " + PriceCalculator.formatPrice(currentMarketPrice) + " USD");
+                System.out.println("[OrderManager] Prezzo aggiornato: " +
+                        PriceCalculator.formatPrice(oldPrice) + " → " +
+                        PriceCalculator.formatPrice(currentMarketPrice) + " USD");
 
-                // Chiama servizio multicast per controllo soglie utenti (vecchio ordinamento)
+                // Chiama servizio multicast per controllo soglie utenti
                 PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
             }
 
-            // Invia notifiche UDP agli utenti coinvolti (best effort)
+            // Invia notifiche UDP agli utenti coinvolti
             try {
                 UDPNotificationService.notifyTradeExecution(
                         bidOrder, askOrder, tradeSize, executionPrice
                 );
             } catch (Exception e) {
-                // Best effort: errore nelle notifiche non blocca il trade
+                // Errore nelle notifiche non blocca il trade
                 System.err.println("[OrderManager] Errore invio notifiche UDP: " + e.getMessage());
             }
 
             // Controlla e attiva eventuali Stop Orders
             StopOrderManager.checkAndActivateStopOrders(currentMarketPrice, OrderManager::executeTrade);
 
+            // Persisti trade su file JSON
             try {
                 int tradeId = OrderIdGenerator.getNextOrderId();
                 TradePersistence.saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice, tradeId);
@@ -421,6 +422,7 @@ public class OrderManager {
         }
     }
 
+    //Valida che il tipo di ordine sia bid o ask
     private static boolean isValidOrderType(String type) {
         return "bid".equals(type) || "ask".equals(type);
     }

@@ -8,14 +8,12 @@ import server.OrderManager.Order;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Servizio UDP per notifiche di trade eseguiti
  * Implementa la comunicazione best-effort con i client quando ordini vengono finalizzati
- * Conforme alle specifiche ALLEGATO 1 del progetto
  */
 public class UDPNotificationService {
 
@@ -29,23 +27,17 @@ public class UDPNotificationService {
     // Gson per serializzazione JSON
     private static final Gson gson = new Gson();
 
-    /**
-     * Inizializza il servizio di notifiche UDP
-     */
+    //Inizializza il servizio di notifiche UDP
     public static void initialize() throws IOException {
         try {
             udpSocket = new DatagramSocket();
-            System.out.println("[UDPNotificationService] Servizio inizializzato");
         } catch (Exception e) {
             System.err.println("[UDPNotificationService] Errore inizializzazione: " + e.getMessage());
             throw new IOException("Impossibile inizializzare servizio notifiche UDP", e);
         }
     }
 
-    /**
-     * Registra l'indirizzo UDP di un client per ricevere notifiche
-     * Chiamato al momento del login
-     */
+    //Registra l'indirizzo UDP di un client per ricevere notifiche
     public static void registerClient(String username, InetSocketAddress address) {
         if (username == null || address == null) {
             System.err.println("[UDPNotificationService] Parametri non validi per registrazione client");
@@ -57,36 +49,35 @@ public class UDPNotificationService {
                 " @ " + address.getAddress().getHostAddress() + ":" + address.getPort());
     }
 
-    /**
-     * Rimuove la registrazione di un client
-     * Chiamato al momento del logout
-     */
+    //Rimuove la registrazione di un client
     public static void unregisterClient(String username) {
         if (clientAddresses.remove(username) != null) {
             System.out.println("[UDPNotificationService] Client rimosso: " + username);
         }
     }
 
-    /**
-     * Invia notifica UDP quando un trade viene eseguito
-     * Notifica entrambi gli utenti coinvolti (buyer e seller)
-     *
-     * @param bidOrder Ordine di acquisto
-     * @param askOrder Ordine di vendita
-     * @param tradeSize Quantità scambiata
-     * @param executionPrice Prezzo di esecuzione
-     */
-    public static void notifyTradeExecution(Order bidOrder, Order askOrder,
-                                            int tradeSize, int executionPrice) {
+    //Invia notifica UDP quando un trade viene eseguito
+    public static void notifyTradeExecution(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
-            // Crea messaggio JSON secondo ALLEGATO 1
-            JsonObject notification = createTradeNotification(
-                    bidOrder, askOrder, tradeSize, executionPrice
+            // Crea notifica per l'acquirente (bid)
+            JsonObject bidNotification = createSingleTradeNotification(
+                    bidOrder,
+                    askOrder.getUsername(),
+                    tradeSize,
+                    executionPrice
             );
 
-            // Invia notifica a entrambi gli utenti (best effort)
-            sendUDPNotification(bidOrder.getUsername(), notification);
-            sendUDPNotification(askOrder.getUsername(), notification);
+            // Crea notifica per il venditore (ask)
+            JsonObject askNotification = createSingleTradeNotification(
+                    askOrder,
+                    bidOrder.getUsername(),
+                    tradeSize,
+                    executionPrice
+            );
+
+            // Invia notifiche separate
+            sendUDPNotification(bidOrder.getUsername(), bidNotification);
+            sendUDPNotification(askOrder.getUsername(), askNotification);
 
             System.out.println("[UDPNotificationService] Notifiche trade inviate a " +
                     bidOrder.getUsername() + " e " + askOrder.getUsername());
@@ -96,54 +87,36 @@ public class UDPNotificationService {
         }
     }
 
-    /**
-     * Crea il messaggio JSON di notifica secondo formato ALLEGATO 1
-     */
-    private static JsonObject createTradeNotification(Order bidOrder, Order askOrder,
-                                                      int tradeSize, int executionPrice) {
+    //Crea il messaggio JSON di notifica per un singolo utente
+    private static JsonObject createSingleTradeNotification(Order userOrder, String counterparty, int tradeSize, int executionPrice) {
         JsonObject notification = new JsonObject();
         notification.addProperty("notification", "closedTrades");
 
         JsonArray trades = new JsonArray();
 
-        // Informazioni per l'acquirente (bid order)
-        JsonObject bidTrade = new JsonObject();
-        bidTrade.addProperty("orderId", bidOrder.getOrderId());
-        bidTrade.addProperty("type", "bid");
-        bidTrade.addProperty("orderType", bidOrder.getOrderType());
-        bidTrade.addProperty("size", tradeSize);
-        bidTrade.addProperty("price", executionPrice);
-        bidTrade.addProperty("counterparty", askOrder.getUsername());
-        bidTrade.addProperty("timestamp", System.currentTimeMillis() / 1000);
-        trades.add(bidTrade);
+        // Informazioni del trade per questo specifico utente
+        JsonObject trade = new JsonObject();
+        trade.addProperty("orderId", userOrder.getOrderId());
+        trade.addProperty("type", userOrder.getType());
+        trade.addProperty("orderType", userOrder.getOrderType());
+        trade.addProperty("size", tradeSize);
+        trade.addProperty("price", executionPrice);
+        trade.addProperty("counterparty", counterparty);
+        trade.addProperty("timestamp", System.currentTimeMillis() / 1000);
 
-        // Informazioni per il venditore (ask order)
-        JsonObject askTrade = new JsonObject();
-        askTrade.addProperty("orderId", askOrder.getOrderId());
-        askTrade.addProperty("type", "ask");
-        askTrade.addProperty("orderType", askOrder.getOrderType());
-        askTrade.addProperty("size", tradeSize);
-        askTrade.addProperty("price", executionPrice);
-        askTrade.addProperty("counterparty", bidOrder.getUsername());
-        askTrade.addProperty("timestamp", System.currentTimeMillis() / 1000);
-        trades.add(askTrade);
-
+        trades.add(trade);
         notification.add("trades", trades);
 
         return notification;
     }
 
-    /**
-     * Invia notifica UDP a un singolo client
-     * Politica best-effort: se client non raggiungibile, notifica persa
-     */
+    //Invia notifica UDP a un singolo client
     private static void sendUDPNotification(String username, JsonObject notification) {
         InetSocketAddress clientAddr = clientAddresses.get(username);
 
         if (clientAddr == null) {
-            // Best effort: client non registrato o offline
-            System.out.println("[UDPNotificationService] Client " + username +
-                    " non registrato, notifica non inviata (best effort)");
+            // Client non registrato o offline
+            System.out.println("[UDPNotificationService] Client " + username + " non registrato, notifica non inviata (best effort)");
             return;
         }
 
@@ -163,29 +136,21 @@ public class UDPNotificationService {
             System.out.println("[UDPNotificationService] Notifica UDP inviata a " + username);
 
         } catch (Exception e) {
-            // Best effort: errori non bloccano il sistema
-            System.err.println("[UDPNotificationService] Impossibile inviare notifica a " +
-                    username + ": " + e.getMessage());
+            System.err.println("[UDPNotificationService] Impossibile inviare notifica a " + username + ": " + e.getMessage());
         }
     }
 
-    /**
-     * Verifica se un client è registrato per ricevere notifiche
-     */
+    //Verifica se un client è registrato per ricevere notifiche
     public static boolean isClientRegistered(String username) {
         return clientAddresses.containsKey(username);
     }
 
-    /**
-     * Ottiene il numero di client attualmente registrati
-     */
+    //Ottiene il numero di client attualmente registrati
     public static int getRegisteredClientsCount() {
         return clientAddresses.size();
     }
 
-    /**
-     * Ottiene statistiche del servizio
-     */
+    //Ottiene statistiche del servizio
     public static JsonObject getStats() {
         JsonObject stats = new JsonObject();
         stats.addProperty("registeredClients", clientAddresses.size());
@@ -193,9 +158,7 @@ public class UDPNotificationService {
         return stats;
     }
 
-    /**
-     * Chiude il servizio e rilascia le risorse
-     */
+    //Chiude il servizio e rilascia le risorse
     public static void shutdown() {
         try {
             if (udpSocket != null && !udpSocket.isClosed()) {

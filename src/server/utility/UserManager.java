@@ -13,19 +13,19 @@ import java.io.IOException;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * Classe di utilità per la gestione degli utenti del sistema CROSS
- * - Caricamento e salvataggio utenti da/in file JSON con formattazione
+ * Classe di utilità per la gestione degli utenti del sistema
+ * - Caricamento e salvataggio utenti da/in file JSON
  * - Ricerca e validazione utenti
  * - Creazione nuovi utenti
  * - Persistenza periodica per sincronizzazione dati
  */
+
 public class UserManager {
 
     // File per memorizzare gli utenti registrati in formato JSON
     private static final String USERS_FILE = "data/users.json";
 
     // Lock per sincronizzazione accesso concorrente al file utenti
-    // ReadWrite lock permette letture multiple simultanee ma scritture esclusive
     private static final ReentrantReadWriteLock usersLock = new ReentrantReadWriteLock();
 
     // Configurazione Gson per JSON formattato
@@ -35,22 +35,45 @@ public class UserManager {
 
     //Inizializza il sistema di gestione utenti
     public static void initialize() throws IOException {
-        // Crea directory data se non esiste
+        // Verifica esistenza directory data
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            dataDir.mkdirs();
-            System.out.println("[UserManager] Creata directory data/");
+            throw new IOException(
+                    "[UserManager] Errore: Directory 'data/' non trovata!\n");
         }
 
-        // Crea file utenti vuoto se non esiste
+        if (!dataDir.isDirectory()) {
+            throw new IOException(
+                    "[UserManager] Errore: 'data/' esiste ma non è una directory!\n");
+        }
+
+        // Verifica esistenza file users.json
         File usersFile = new File(USERS_FILE);
         if (!usersFile.exists()) {
-            initializeUsersFile();
-            System.out.println("[UserManager] Inizializzato file users.json");
+            throw new IOException(
+                    "[UserManager] Errore: File 'data/users.json' non trovato!\n");
         }
 
-        System.out.println("[UserManager] Sistema gestione utenti inizializzato");
+        if (!usersFile.isFile()) {
+            throw new IOException(
+                    "[UserManager] Errore: 'data/users.json' esiste ma non è un file!\n");
+        }
+
+        // Verifica che il file non sia vuoto e abbia una struttura valida
+        if (usersFile.length() == 0) {
+            throw new IOException(
+                    "[UserManager] Errore: File 'data/users.json' è vuoto!\n");
+        }
+
+        // Tenta di caricare il file per verificare che sia un JSON valido
+        try {
+            JsonArray users = loadUsersInternal();
+        } catch (Exception e) {
+            throw new IOException(
+                    "[UserManager] Errore: File 'data/users.json' non è un JSON valido!\n");
+        }
     }
+
 
     //Carica la lista degli utenti dal file JSON
     public static JsonArray loadUsers() throws IOException {
@@ -107,19 +130,26 @@ public class UserManager {
     }
 
     //Valida i parametri di registrazione
-    public static int validateRegistrationParams(String username, String password) {
+    public static int validateRegistrationParams(String username, String password) throws IOException {
+        // Controlla username vuoto o null
         if (username == null || username.trim().isEmpty()) {
-            return 103; // username non valido
+            return 103;
         }
 
+        // Controlla password vuota o null
         if (password == null || password.trim().isEmpty()) {
-            return 101; // password non valida
+            return 101;
         }
 
-        return 0; // parametri validi
+        // Controlla se username già esistente
+        if (isUsernameExists(username)) {
+            return 102;
+        }
+
+        return 100;
     }
 
-    //Valida i parametri di login con controlli più permissivi rispetto alla registrazione
+    //Valida i parametri di login
     public static boolean validateLoginParams(String username, String password) {
         return username != null && !username.trim().isEmpty() &&
                 password != null && !password.trim().isEmpty();
@@ -144,7 +174,7 @@ public class UserManager {
             // Cerca l'utente nella lista
             JsonObject user = findUser(users, username);
             if (user == null) {
-                return false; // Utente non trovato
+                return false;
             }
 
             // Confronta password
@@ -159,12 +189,12 @@ public class UserManager {
 
     //Valida una password secondo i criteri del sistema
     public static boolean isValidPassword(String password) {
-        // Criteri di validazione base secondo le specifiche del progetto
+
         if (password == null) {
             return false;
         }
 
-        // La password non può essere completamente vuota o contenere solo spazi
+        // La password non può essere completamente vuota
         if (password.trim().isEmpty()) {
             return false;
         }
@@ -173,12 +203,17 @@ public class UserManager {
     }
 
     //Aggiorna la password di un utente esistente nel sistema
-    public static boolean updatePassword(String username, String oldPassword, String newPassword) {
+    public static int updatePassword(String username, String oldPassword, String newPassword) {
         usersLock.writeLock().lock();
         try {
-            // Validazione parametri
+            // Validazione nuova password
             if (!isValidPassword(newPassword)) {
-                return false;
+                return 101;
+            }
+
+            // Verifica che nuova password sia diversa dalla vecchia
+            if (oldPassword.equals(newPassword)) {
+                return 103;
             }
 
             // Carica lista utenti
@@ -187,18 +222,13 @@ public class UserManager {
             // Cerca l'utente
             JsonObject user = findUser(users, username);
             if (user == null) {
-                return false; // Utente non trovato
+                return 102;
             }
 
             // Verifica password attuale
             String storedPassword = user.get("password").getAsString();
             if (!oldPassword.equals(storedPassword)) {
-                return false; // Password attuale non corretta
-            }
-
-            // Verifica che nuova password sia diversa dalla vecchia
-            if (oldPassword.equals(newPassword)) {
-                return false; // Stessa password
+                return 102;
             }
 
             // Aggiorna password nell'oggetto utente
@@ -208,11 +238,11 @@ public class UserManager {
             saveUsers(users);
 
             System.out.println("[UserManager] Password aggiornata per utente: " + username);
-            return true;
+            return 100; // OK
 
         } catch (Exception e) {
             System.err.println("[UserManager] Errore aggiornamento password: " + e.getMessage());
-            return false;
+            return 105;
         } finally {
             usersLock.writeLock().unlock();
         }
@@ -240,7 +270,7 @@ public class UserManager {
             // Carica gli utenti correnti
             JsonArray users = loadUsersInternal();
 
-            // Salva la lista (questo forza il flush su disco)
+            // Salva la lista
             JsonObject rootObject = new JsonObject();
             rootObject.add("users", users);
 
@@ -272,13 +302,11 @@ public class UserManager {
             if (rootObject != null && rootObject.has("users")) {
                 return rootObject.getAsJsonArray("users");
             } else {
-                // File corrotto o struttura non valida, reinizializza
                 System.out.println("[UserManager] File users.json corrotto, reinizializzazione...");
                 initializeUsersFile();
                 return new JsonArray();
             }
         } catch (Exception e) {
-            // Se c'è un errore nel parsing, reinizializza il file
             System.err.println("[UserManager] Errore lettura file utenti, reinizializzazione: " + e.getMessage());
             initializeUsersFile();
             return new JsonArray();
