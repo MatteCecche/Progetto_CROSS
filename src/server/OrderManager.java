@@ -392,27 +392,26 @@ public class OrderManager {
                         PriceCalculator.formatPrice(oldPrice) + " → " +
                         PriceCalculator.formatPrice(currentMarketPrice) + " USD");
 
-                // Chiama servizio multicast per controllo soglie utenti
+                // Chiama servizio multicast per controllo soglie utenti (vecchio ordinamento)
                 PriceNotificationService.checkAndNotifyPriceThresholds(currentMarketPrice);
             }
 
-            // Invia notifiche UDP agli utenti coinvolti
+            // Invia notifiche UDP agli utenti coinvolti (best effort)
             try {
                 UDPNotificationService.notifyTradeExecution(
                         bidOrder, askOrder, tradeSize, executionPrice
                 );
             } catch (Exception e) {
-                // Errore nelle notifiche non blocca il trade
+                // Best effort: errore nelle notifiche non blocca il trade
                 System.err.println("[OrderManager] Errore invio notifiche UDP: " + e.getMessage());
             }
 
             // Controlla e attiva eventuali Stop Orders
             StopOrderManager.checkAndActivateStopOrders(currentMarketPrice, OrderManager::executeTrade);
 
-            // Persisti trade su file JSON
+            // Salva trade nel file storico (genera 2 record: uno per bid, uno per ask)
             try {
-                int tradeId = OrderIdGenerator.getNextOrderId();
-                TradePersistence.saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice, tradeId);
+                TradePersistence.saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
             } catch (IOException e) {
                 System.err.println("[OrderManager] Errore salvataggio trade: " + e.getMessage());
             }

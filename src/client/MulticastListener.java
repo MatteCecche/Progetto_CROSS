@@ -116,14 +116,17 @@ public class MulticastListener implements Runnable {
 
     //Mostra notifica di soglia prezzo all'utente
     private void displayPriceNotification(int thresholdPrice, int currentPrice, String message) {
-        System.out.println("\n" + "=".repeat(60));
+        // Crea separatore con metodo compatibile Java 8
+        String separator = repeatString("=", 60);
+
+        System.out.println("\n" + separator);
         System.out.println("NOTIFICA PREZZO BTC");
-        System.out.println("=".repeat(60));
+        System.out.println(separator);
         System.out.println("Messaggio: " + message);
         System.out.println("Soglia registrata: " + formatPrice(thresholdPrice) + " USD");
         System.out.println("Prezzo corrente: " + formatPrice(currentPrice) + " USD");
         System.out.println("Utente: " + username);
-        System.out.println("=".repeat(60));
+        System.out.println(separator);
         System.out.print(">> "); // Ripristina prompt per input utente
     }
 
@@ -158,5 +161,14 @@ public class MulticastListener implements Runnable {
     //Verifica se il listener è attualmente in esecuzione
     public boolean isRunning() {
         return running;
+    }
+
+    //Metodo helper per ripetere una stringa n volte (alternativa a String.repeat() per Java 8)
+    private String repeatString(String str, int times) {
+        StringBuilder sb = new StringBuilder(str.length() * times);
+        for (int i = 0; i < times; i++) {
+            sb.append(str);
+        }
+        return sb.toString();
     }
 }

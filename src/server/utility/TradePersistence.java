@@ -2,7 +2,6 @@ package server.utility;
 
 import com.google.gson.*;
 import server.OrderManager.Order;  // Import della classe Order
-import server.utility.OrderIdGenerator;
 
 import java.io.File;
 import java.io.FileReader;
@@ -10,7 +9,11 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-//Gestisce la persistenza dei trade nel file StoricoOrdini.json
+/**
+ * Gestisce la persistenza dei trade nel file StoricoOrdini.json
+ * Ogni trade eseguito genera DUE record separati (uno per bid, uno per ask)
+ * compatibili con il formato JSON esistente
+ */
 public class TradePersistence {
 
     // File storico unificato per tutti i trade
@@ -25,7 +28,9 @@ public class TradePersistence {
             .disableHtmlEscaping()
             .create();
 
-    //Inizializza il sistema di persistenza
+    /**
+     * Inizializza il sistema di persistenza
+     */
     public static void initialize() throws IOException {
         // Crea directory data se non esiste
         File dataDir = new File("data");
@@ -44,13 +49,16 @@ public class TradePersistence {
             // Verifica integrità del file
             try {
                 JsonArray trades = loadTrades();
+                System.out.println("[TradePersistence] File storico caricato: " + trades.size() + " record");
             } catch (Exception e) {
                 System.err.println("[TradePersistence] Errore verifica file: " + e.getMessage());
             }
         }
     }
 
-    //Carica tutti i trade dal file storico
+    /**
+     * Carica tutti i trade dal file storico
+     */
     public static JsonArray loadTrades() throws IOException {
         ordersLock.readLock().lock();
         try {
@@ -82,7 +90,9 @@ public class TradePersistence {
         }
     }
 
-    //Salva tutti i trade nel file storico
+    /**
+     * Salva tutti i trade nel file storico
+     */
     public static void saveTrades(JsonArray trades) throws IOException {
         ordersLock.writeLock().lock();
         try {
@@ -100,7 +110,9 @@ public class TradePersistence {
         }
     }
 
-    //Aggiunge un singolo trade al file storico
+    /**
+     * Aggiunge un singolo trade al file storico
+     */
     public static void addTrade(JsonObject tradeData) throws IOException {
         try {
             // Carica tutti i record esistenti
@@ -121,36 +133,52 @@ public class TradePersistence {
         }
     }
 
-    //Salva un trade eseguito nel formato standard del sistema
-    public static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price, int tradeId) throws IOException {
+    /**
+     * Salva un trade eseguito nel formato standard del sistema
+     *
+     * IMPORTANTE: Ogni trade genera DUE record separati:
+     * - Un record per il bid order
+     * - Un record per l'ask order
+     *
+     * Formato conforme a storicoOrdini.json esistente:
+     * {"orderId": INT, "type": "bid"/"ask", "orderType": "market"/"limit"/"stop",
+     *  "size": INT, "price": INT, "timestamp": LONG}
+     *
+     * @param bidOrder L'ordine di acquisto coinvolto nel trade
+     * @param askOrder L'ordine di vendita coinvolto nel trade
+     * @param size La quantità scambiata (in millesimi di BTC)
+     * @param price Il prezzo di esecuzione (in millesimi di USD)
+     */
+    public static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price) throws IOException {
         try {
-            // Crea record del trade nel formato standard
-            JsonObject tradeRecord = new JsonObject();
+            long timestamp = System.currentTimeMillis() / 1000; // UNIX timestamp condiviso
 
-            // Usa l'ID fornito dall'esterno
-            tradeRecord.addProperty("orderId", tradeId);
+            // Record per il BID order (acquirente)
+            JsonObject bidTrade = new JsonObject();
+            bidTrade.addProperty("orderId", bidOrder.getOrderId());
+            bidTrade.addProperty("type", "bid");
+            bidTrade.addProperty("orderType", bidOrder.getOrderType());
+            bidTrade.addProperty("size", size);
+            bidTrade.addProperty("price", price);
+            bidTrade.addProperty("timestamp", timestamp);
 
-            // Metadati del trade
-            tradeRecord.addProperty("type", "executed");
-            tradeRecord.addProperty("orderType", "completed");
+            // Record per l'ASK order (venditore)
+            JsonObject askTrade = new JsonObject();
+            askTrade.addProperty("orderId", askOrder.getOrderId());
+            askTrade.addProperty("type", "ask");
+            askTrade.addProperty("orderType", askOrder.getOrderType());
+            askTrade.addProperty("size", size);
+            askTrade.addProperty("price", price);
+            askTrade.addProperty("timestamp", timestamp);
 
-            // Dati principali
-            tradeRecord.addProperty("size", size);
-            tradeRecord.addProperty("price", price);
-            tradeRecord.addProperty("timestamp", System.currentTimeMillis() / 1000); // UNIX timestamp
-
-            // Metadati per tracciabilità
-            tradeRecord.addProperty("bidOrderId", bidOrder.getOrderId());
-            tradeRecord.addProperty("askOrderId", askOrder.getOrderId());
-            tradeRecord.addProperty("bidUsername", bidOrder.getUsername());
-            tradeRecord.addProperty("askUsername", askOrder.getUsername());
-
-            // Persiste il trade
-            addTrade(tradeRecord);
+            // Salva entrambi i record
+            addTrade(bidTrade);
+            addTrade(askTrade);
 
             System.out.println("[TradePersistence] Trade salvato: " +
-                    formatSize(size) + " BTC @ " + formatPrice(price) + " USD (ID: " +
-                    tradeRecord.get("orderId").getAsInt() + ")");
+                    formatSize(size) + " BTC @ " + formatPrice(price) + " USD " +
+                    "(Bid: " + bidOrder.getOrderId() + " [" + bidOrder.getUsername() + "], " +
+                    "Ask: " + askOrder.getOrderId() + " [" + askOrder.getUsername() + "])");
 
         } catch (Exception e) {
             System.err.println("[TradePersistence] Errore salvataggio trade eseguito: " + e.getMessage());
@@ -158,7 +186,9 @@ public class TradePersistence {
         }
     }
 
-    //Conta il numero totale di trade nel file
+    /**
+     * Conta il numero totale di trade nel file
+     */
     public static int getTotalTradesCount() {
         try {
             JsonArray trades = loadTrades();
@@ -169,7 +199,9 @@ public class TradePersistence {
         }
     }
 
-    //Ottiene statistiche del file storico
+    /**
+     * Ottiene statistiche del file storico
+     */
     public static JsonObject getStats() {
         JsonObject stats = new JsonObject();
 
@@ -202,7 +234,9 @@ public class TradePersistence {
         return stats;
     }
 
-    //Verifica l'integrità del file storico
+    /**
+     * Verifica l'integrità del file storico
+     */
     public static boolean verifyFileIntegrity() {
         try {
             JsonArray trades = loadTrades();
@@ -214,17 +248,23 @@ public class TradePersistence {
         }
     }
 
-    //Formatta prezzo in millesimi
+    /**
+     * Formatta prezzo in millesimi di USD
+     */
     private static String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    //Formatta size in millesimi
+    /**
+     * Formatta size in millesimi di BTC
+     */
     private static String formatSize(int sizeInMillis) {
         return String.format("%.3f", sizeInMillis / 1000.0);
     }
 
-    //Ottiene il path del file storico
+    /**
+     * Ottiene il path assoluto del file storico
+     */
     public static String getStoricoFilePath() {
         return new File(STORICO_FILE).getAbsolutePath();
     }

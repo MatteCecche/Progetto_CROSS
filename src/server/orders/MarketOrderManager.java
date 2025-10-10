@@ -10,19 +10,10 @@ import server.utility.PriceCalculator;
  * - Validazione parametri Market Order
  * - Controllo disponibilità liquidità nell'order book
  * - Esecuzione immediata tramite MatchingEngine
- *
- * I Market Orders vengono eseguiti immediatamente contro gli ordini
- * esistenti nell'order book al miglior prezzo disponibile
  */
 public class MarketOrderManager {
 
-    /**
-     * Inserisce ed esegue un Market Order nel sistema
-     *
-     * @param order L'ordine Market da eseguire
-     * @param tradeExecutor Callback per esecuzione trade
-     * @return true se esecuzione avvenuta con successo, false altrimenti
-     */
+    //Inserisce ed esegue un Market Order nel sistema
     public static boolean insertMarketOrder(Order order, MatchingEngine.TradeExecutor tradeExecutor) {
         try {
             // Validazione tipo ordine
@@ -68,12 +59,7 @@ public class MarketOrderManager {
         }
     }
 
-    /**
-     * Valida i parametri di un Market Order
-     *
-     * @param order L'ordine da validare
-     * @return true se l'ordine è valido, false altrimenti
-     */
+    //Valida i parametri di un Market Order
     private static boolean isValidMarketOrder(Order order) {
         // Validazione tipo (bid o ask)
         if (!isValidOrderType(order.getType())) {
@@ -94,19 +80,12 @@ public class MarketOrderManager {
         return true;
     }
 
-    /**
-     * Verifica che il tipo di ordine sia valido (bid o ask)
-     */
+    //Verifica che il tipo di ordine sia valido (bid o ask)
     private static boolean isValidOrderType(String type) {
         return "bid".equals(type) || "ask".equals(type);
     }
 
-    /**
-     * Verifica se c'è liquidità sufficiente nell'order book per eseguire il Market Order
-     *
-     * @param order Il Market Order da verificare
-     * @return true se c'è liquidità sufficiente, false altrimenti
-     */
+    //Verifica se c'è liquidità sufficiente nell'order book per eseguire il Market Order
     private static boolean hasLiquidity(Order order) {
         String type = order.getType();
         int requiredSize = order.getSize();
@@ -115,11 +94,7 @@ public class MarketOrderManager {
         return OrderBook.hasLiquidity(type, requiredSize);
     }
 
-    /**
-     * Ottiene statistiche sui Market Orders potenzialmente eseguibili
-     *
-     * @return Mappa con statistiche correnti sulla liquidità disponibile
-     */
+    //Ottiene statistiche sui Market Orders potenzialmente eseguibili
     public static java.util.Map<String, Object> getMarketOrderStats() {
         java.util.Map<String, Object> stats = new java.util.HashMap<>();
 

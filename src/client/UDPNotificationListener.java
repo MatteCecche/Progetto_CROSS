@@ -9,7 +9,6 @@ import java.net.DatagramSocket;
 
 /**
  * Thread listener per ricevere notifiche UDP asincrone dal server CROSS
- * Gestisce le notifiche di trade eseguiti secondo formato ALLEGATO 1
  */
 public class UDPNotificationListener implements Runnable {
 
@@ -34,9 +33,7 @@ public class UDPNotificationListener implements Runnable {
         this.running = false;
     }
 
-    /**
-     * Avvia il listener UDP
-     */
+    //Avvia il listener UDP
     public void start() throws Exception {
         try {
             // Crea socket UDP sulla porta specificata
@@ -53,10 +50,7 @@ public class UDPNotificationListener implements Runnable {
         }
     }
 
-    /**
-     * Loop principale di ascolto messaggi UDP
-     */
-    @Override
+    //Loop principale di ascolto messaggi UDP
     public void run() {
         byte[] buffer = new byte[4096]; // Buffer per messaggi UDP
 
@@ -88,9 +82,7 @@ public class UDPNotificationListener implements Runnable {
         System.out.println("[UDPListener] Thread listener terminato");
     }
 
-    /**
-     * Processa una notifica UDP ricevuta dal server
-     */
+    //Processa una notifica UDP ricevuta dal server
     private void processNotification(String jsonMessage) {
         try {
             // Parsing JSON del messaggio
@@ -120,13 +112,15 @@ public class UDPNotificationListener implements Runnable {
         }
     }
 
-    /**
-     * Mostra notifica di trade eseguito all'utente
-     */
+    //Mostra notifica di trade eseguito all'utente
     private void displayTradeNotification(JsonArray trades) {
-        System.out.println("\n" + "=".repeat(70));
-        System.out.println("⚡ NOTIFICA: TRADE ESEGUITO");
-        System.out.println("=".repeat(70));
+        // Crea separatori con metodo compatibile Java 8
+        String separatorFull = repeatString("=", 70);
+        String separatorDash = repeatString("-", 70);
+
+        System.out.println("\n" + separatorFull);
+        System.out.println("NOTIFICA: TRADE ESEGUITO");
+        System.out.println(separatorFull);
 
         for (int i = 0; i < trades.size(); i++) {
             JsonObject trade = trades.get(i).getAsJsonObject();
@@ -145,28 +139,26 @@ public class UDPNotificationListener implements Runnable {
                     trade.get("timestamp").getAsLong() : System.currentTimeMillis() / 1000;
 
             // Formattazione output
-            System.out.println("\n📋 Dettagli Trade:");
+            System.out.println("\n Dettagli Trade:");
             System.out.println("   Order ID:       " + orderId);
             System.out.println("   Tipo:           " + (type.equals("bid") ? "ACQUISTO (BID)" : "VENDITA (ASK)"));
             System.out.println("   Order Type:     " + orderType.toUpperCase());
-            System.out.println("   Quantità:       " + formatSize(size) + " BTC");
+            System.out.println("   Quantita:       " + formatSize(size) + " BTC");
             System.out.println("   Prezzo:         " + formatPrice(price) + " USD");
             System.out.println("   Controparte:    " + counterparty);
             System.out.println("   Timestamp:      " + timestamp);
 
             if (i < trades.size() - 1) {
-                System.out.println("\n" + "-".repeat(70));
+                System.out.println("\n" + separatorDash);
             }
         }
 
-        System.out.println("\n" + "=".repeat(70));
+        System.out.println("\n" + separatorFull);
         System.out.print(">> "); // Ripristina prompt per input utente
         System.out.flush();
     }
 
-    /**
-     * Ferma il listener UDP in modo pulito
-     */
+    //Ferma il listener UDP in modo pulito
     public void stop() {
         System.out.println("[UDPListener] Fermando listener UDP...");
 
@@ -182,31 +174,32 @@ public class UDPNotificationListener implements Runnable {
         }
     }
 
-    /**
-     * Formatta prezzo in millesimi per display user-friendly
-     */
+    //Formatta prezzo in millesimi per display
     private String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 
-    /**
-     * Formatta size in millesimi per display user-friendly
-     */
+    //Formatta size in millesimi per display
     private String formatSize(int sizeInMillis) {
         return String.format("%.3f", sizeInMillis / 1000.0);
     }
 
-    /**
-     * Verifica se il listener è attualmente in esecuzione
-     */
+    //Verifica se il listener è attualmente in esecuzione
     public boolean isRunning() {
         return running;
     }
 
-    /**
-     * Ottiene la porta UDP su cui il listener è in ascolto
-     */
+    //Ottiene la porta UDP su cui il listener è in ascolto
     public int getUdpPort() {
         return udpPort;
+    }
+
+    //Metodo helper per ripetere una stringa n volte
+    private String repeatString(String str, int times) {
+        StringBuilder sb = new StringBuilder(str.length() * times);
+        for (int i = 0; i < times; i++) {
+            sb.append(str);
+        }
+        return sb.toString();
     }
 }

@@ -166,7 +166,7 @@ public class ClientHandler implements Runnable {
 
             // Controllo se l'utente è già loggato
             if (isUserAlreadyLoggedIn(username)) {
-                return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
+                return ResponseBuilder.Login.userAlreadyLogged();
             }
 
             // Verifica credenziali tramite UserManager
@@ -176,9 +176,6 @@ public class ClientHandler implements Runnable {
 
             // Login completato
             socketUserMap.put(clientSocket, username);
-
-            // Salva il nome per il cleanup
-            lastLoggedUsername = username;
 
             // Registra client per notifiche UDP trade
             if (values.has("udpPort")) {
@@ -247,7 +244,7 @@ public class ClientHandler implements Runnable {
 
             // Controllo se l'utente è attualmente loggato
             if (isUserAlreadyLoggedIn(username)) {
-                return ResponseBuilder.Login.userAlreadyLogged();
+                return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
             }
 
             // Validazione nuova password
@@ -257,7 +254,7 @@ public class ClientHandler implements Runnable {
 
             // Controllo che nuova password sia diversa dalla vecchia
             if (oldPassword.equals(newPassword)) {
-                return ResponseBuilder.UpdateCredentials.otherError("La nuova password deve essere diversa da quella attuale");
+                return ResponseBuilder.UpdateCredentials.passwordEqualToOld();
             }
 
             // Aggiornamento tramite UserManager
@@ -271,7 +268,7 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore aggiornamento credenziali: " + e.getMessage());
-            return createErrorResponse(105, "Errore interno durante aggiornamento");
+            return ResponseBuilder.UpdateCredentials.otherError("Errore interno durante aggiornamento");
         }
     }
 

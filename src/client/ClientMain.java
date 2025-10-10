@@ -19,8 +19,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import server.RegistrazioneRMI;
-import static server.utility.PriceCalculator.formatPrice;
-import static server.utility.PriceCalculator.formatSize;
 
 /**
  * Classe Main del client CROSS
@@ -107,7 +105,6 @@ public class ClientMain {
         try {
             // Inizializza thread pool per le operazioni
             pool = Executors.newCachedThreadPool();
-            System.out.println("[Client] Thread pool inizializzato (CachedThreadPool)");
 
             // Inizializza scanner per input utente dalla console
             userScanner = new Scanner(System.in);
@@ -1224,6 +1221,11 @@ public class ClientMain {
     //Formatta prezzo in millesimi
     private static String formatPrice(int priceInMillis) {
         return String.format("%,.0f", priceInMillis / 1000.0);
+    }
+
+    //Formatta size in millesimi
+    private static String formatSize(int sizeInMillis) {
+        return String.format("%.3f", sizeInMillis / 1000.0);
     }
 
     //Esegue lo shutdown ordinato del client

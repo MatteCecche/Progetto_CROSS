@@ -13,13 +13,7 @@ import server.utility.PriceCalculator;
  */
 public class LimitOrderManager {
 
-    /**
-     * Inserisce un Limit Order nel sistema
-     *
-     * @param order L'ordine Limit da inserire
-     * @param tradeExecutor Callback per esecuzione trade
-     * @return true se inserimento avvenuto con successo, false altrimenti
-     */
+    //Inserisce un Limit Order nel sistema
     public static boolean insertLimitOrder(Order order, MatchingEngine.TradeExecutor tradeExecutor) {
         try {
             // Validazione tipo ordine
@@ -58,12 +52,7 @@ public class LimitOrderManager {
         }
     }
 
-    /**
-     * Valida i parametri di un Limit Order
-     *
-     * @param order L'ordine da validare
-     * @return true se l'ordine è valido, false altrimenti
-     */
+    //Valida i parametri di un Limit Order
     private static boolean isValidLimitOrder(Order order) {
         // Validazione tipo (bid o ask)
         if (!isValidOrderType(order.getType())) {
@@ -83,18 +72,12 @@ public class LimitOrderManager {
         return true;
     }
 
-    /**
-     * Verifica che il tipo di ordine sia valido (bid o ask)
-     */
+    //Verifica che il tipo di ordine sia valido (bid o ask)
     private static boolean isValidOrderType(String type) {
         return "bid".equals(type) || "ask".equals(type);
     }
 
-    /**
-     * Ottiene statistiche sui Limit Orders nell'OrderBook
-     *
-     * @return Mappa con statistiche correnti
-     */
+    //Ottiene statistiche sui Limit Orders nell'OrderBook
     public static java.util.Map<String, Object> getLimitOrderStats() {
         java.util.Map<String, Object> stats = new java.util.HashMap<>();
 

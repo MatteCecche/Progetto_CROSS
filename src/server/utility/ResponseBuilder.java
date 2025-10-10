@@ -48,11 +48,11 @@ public class ResponseBuilder {
     /**
      * UPDATE CREDENTIALS
      * 100 - OK
-     * 101 - invalid password
-     * 102 - username not found
-     * 103 - other error cases
-     * 104 - user already logged (requirement specifico)
-     * 105 - internal error
+     * 101 - invalid new password
+     * 102 - username/old_password mismatch or non existent username
+     * 103 - new password equal to old one
+     * 104 - user currently logged in
+     * 105 - other error cases
      */
     public static class UpdateCredentials {
         public static JsonObject success() {
@@ -76,6 +76,13 @@ public class ResponseBuilder {
             return response;
         }
 
+        public static JsonObject passwordEqualToOld() {
+            JsonObject response = new JsonObject();
+            response.addProperty("response", 103);
+            response.addProperty("errorMessage", "La nuova password deve essere diversa dalla vecchia");
+            return response;
+        }
+
         public static JsonObject userAlreadyLogged() {
             JsonObject response = new JsonObject();
             response.addProperty("response", 104);
@@ -85,7 +92,7 @@ public class ResponseBuilder {
 
         public static JsonObject otherError(String message) {
             JsonObject response = new JsonObject();
-            response.addProperty("response", 103);
+            response.addProperty("response", 105);
             response.addProperty("errorMessage", message);
             return response;
         }
