@@ -12,11 +12,9 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 /**
  * Implementazione del servizio RMI per registrazione utenti nel sistema CROSS
  * - Implementazione dell'interfaccia RMI per registrazione remota
- * - Validazione parametri di registrazione (username e password)
- * - Delegazione completa a UserManager per persistenza e logica utenti
+ * - Validazione parametri di registrazione
  * - Gestione errori RMI e codici di risposta standardizzati
  * - Inizializzazione del sistema di gestione utenti
- * - Gestione thread-safe per registrazioni concorrenti
  */
 
 public class RegistrazioneRMIImpl extends UnicastRemoteObject implements RegistrazioneRMI {

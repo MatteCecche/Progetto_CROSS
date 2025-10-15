@@ -234,7 +234,7 @@ public class ClientHandler implements Runnable {
     private JsonObject handleUpdateCredentials(JsonObject request) {
         try {
             if (!request.has("values")) {
-                return createErrorResponse(103, "Messaggio non valido: manca campo values");
+                return ResponseBuilder.UpdateCredentials.otherError("Messaggio non valido: manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
@@ -242,33 +242,36 @@ public class ClientHandler implements Runnable {
             String oldPassword = getStringValue(values, "old_password");
             String newPassword = getStringValue(values, "new_password");
 
-            // Controllo se l'utente è attualmente loggato
-            if (isUserAlreadyLoggedIn(username)) {
-                return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
+            // Validazione parametri base
+            if (username == null || username.trim().isEmpty() ||
+                    oldPassword == null || oldPassword.trim().isEmpty() ||
+                    newPassword == null || newPassword.trim().isEmpty()) {
+                return ResponseBuilder.UpdateCredentials.otherError("Parametri non validi");
             }
 
-            // Validazione nuova password
-            if (!UserManager.isValidPassword(newPassword)) {
-                return ResponseBuilder.UpdateCredentials.invalidPassword();
-            }
+            // Chiamata al metodo updatePassword con la mappa delle sessioni
+            int resultCode = UserManager.updatePassword(username, oldPassword, newPassword, socketUserMap);
 
-            // Controllo che nuova password sia diversa dalla vecchia
-            if (oldPassword.equals(newPassword)) {
-                return ResponseBuilder.UpdateCredentials.passwordEqualToOld();
-            }
-
-            // Aggiornamento tramite UserManager
-            int success = UserManager.updatePassword(username, oldPassword, newPassword);
-            if (success == 100) {
-                System.out.println("[ClientHandler] Password aggiornata per utente: " + username);
-                return ResponseBuilder.UpdateCredentials.success();
-            } else {
-                return ResponseBuilder.UpdateCredentials.usernameNotFound();
+            // Costruzione risposta basata sul codice ritornato
+            switch (resultCode) {
+                case 100:
+                    return ResponseBuilder.UpdateCredentials.success();
+                case 101:
+                    return ResponseBuilder.UpdateCredentials.invalidPassword();
+                case 102:
+                    return ResponseBuilder.UpdateCredentials.usernameNotFound();
+                case 103:
+                    return ResponseBuilder.UpdateCredentials.passwordEqualToOld();
+                case 104:
+                    return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
+                case 105:
+                default:
+                    return ResponseBuilder.UpdateCredentials.otherError("Errore durante aggiornamento password");
             }
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore aggiornamento credenziali: " + e.getMessage());
-            return ResponseBuilder.UpdateCredentials.otherError("Errore interno durante aggiornamento");
+            System.err.println("[ClientHandler] Errore durante updateCredentials: " + e.getMessage());
+            return ResponseBuilder.UpdateCredentials.otherError("Errore interno del server");
         }
     }
 
