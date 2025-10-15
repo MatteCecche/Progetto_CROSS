@@ -29,9 +29,7 @@ public class UserManager {
     private static final Object FILE_LOCK = new Object();
 
     // Configurazione Gson per JSON formattato
-    private static final Gson gson = new GsonBuilder()
-            .setPrettyPrinting()
-            .create();
+    private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
     //Inizializza il sistema di gestione utenti
     public static void initialize() throws IOException {
@@ -160,15 +158,13 @@ public class UserManager {
 
     //Valida i parametri di login
     public static boolean validateLoginParams(String username, String password) {
-        return username != null && !username.trim().isEmpty() &&
-                password != null && !password.trim().isEmpty();
+        return username != null && !username.trim().isEmpty() && password != null && !password.trim().isEmpty();
     }
 
     //Valida le credenziali di un utente confrontando username e password
     public static boolean validateCredentials(String username, String password) {
         try {
-            if (username == null || password == null ||
-                    username.trim().isEmpty() || password.trim().isEmpty()) {
+            if (username == null || password == null || username.trim().isEmpty() || password.trim().isEmpty()) {
                 return false;
             }
 
@@ -266,6 +262,11 @@ public class UserManager {
     //Getter per il path del file utenti
     public static String getUsersFilePath() {
         return USERS_FILE;
+    }
+
+    //Getter per l'oggetto lock condiviso
+    public static Object getFileLock() {
+        return FILE_LOCK;
     }
 
     //Inizializza il file degli utenti con una struttura JSON vuota
