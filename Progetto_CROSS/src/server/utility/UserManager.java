@@ -13,101 +13,171 @@ import java.io.IOException;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 
-/**
- * Classe di utilità per la gestione degli utenti del sistema
- * - Caricamento e salvataggio utenti da/in file JSON
- * - Ricerca e validazione utenti
- * - Creazione nuovi utenti
- * - Persistenza periodica per sincronizzazione dati
+/*
+ * Gestisce gli utenti del sistema salvandoli in un file JSON
  */
 public class UserManager {
 
-    // File per memorizzare gli utenti registrati in formato JSON
+    // File per memorizzare gli utenti registrati
     private static final String USERS_FILE = "data/users.json";
 
-    // Oggetto lock per sincronizzazione con synchronized
+    // Oggetto lock per sincronizzazione
     private static final Object FILE_LOCK = new Object();
 
-    // Configurazione Gson per JSON formattato
+    // Configurazione Gson
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-    //Inizializza il sistema di gestione utenti
+    // Controlla che tutto sia a posto prima di partire
     public static void initialize() throws IOException {
-        // Verifica esistenza directory data
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException("[UserManager] Errore: Directory 'data/' non trovata!\n");
+            throw new IOException("[UserManager] Cartella 'data' non trovata\n");
         }
 
-        if (!dataDir.isDirectory()) {
-            throw new IOException("[UserManager] Errore: 'data/' esiste ma non è una directory!\n");
-        }
-
-        // Verifica esistenza file users.json
         File usersFile = new File(USERS_FILE);
         if (!usersFile.exists()) {
-            throw new IOException("[UserManager] Errore: File 'data/users.json' non trovato!\n");
+            throw new IOException("[UserManager] File 'users.json' non trovato\n");
         }
 
-        if (!usersFile.isFile()) {
-            throw new IOException("[UserManager] Errore: 'data/users.json' esiste ma non è un file!\n");
-        }
-
-        // Verifica che il file non sia vuoto e abbia una struttura valida
+        // Se il file è vuoto lo inizializzo
         if (usersFile.length() == 0) {
-            throw new IOException("[UserManager] Errore: File 'data/users.json' è vuoto!\n");
+            initializeUsersFile();
+        }
+    }
+
+    private static void initializeUsersFile() throws IOException {
+        JsonObject rootObject = new JsonObject();
+        rootObject.add("users", new JsonArray());
+
+        try (FileWriter writer = new FileWriter(USERS_FILE)) {
+            gson.toJson(rootObject, writer);
+        }
+    }
+
+    public static JsonObject createUser(String username, String password) {
+        JsonObject newUser = new JsonObject();
+        newUser.addProperty("username", username.trim());
+        newUser.addProperty("password", password);
+        return newUser;
+    }
+
+    // Controlla se i dati di registrazione sono validi
+    public static int validateRegistrationParams(String username, String password) throws IOException {
+        if (username == null || username.trim().isEmpty()) {
+            return 103;
         }
 
-        // Tenta di caricare il file per verificare che sia un JSON valido
+        if (password == null || password.trim().isEmpty()) {
+            return 101;
+        }
+
+        if (isUsernameExists(username)) {
+            return 102;
+        }
+
+        return 100;
+    }
+
+    public static boolean isUsernameExists(String username) throws IOException {
+        JsonArray users = loadUsers();
+        JsonObject user = findUser(users, username);
+
+        if (user != null) {
+            return true;
+        }
+        return false;
+    }
+
+    public static boolean validateLoginParams(String username, String password) {
+        // Controllo username
+        if (username == null || username.trim().isEmpty()) {
+            return false;
+        }
+
+        // Controllo password
+        if (password == null || password.trim().isEmpty()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    public static boolean validateCredentials(String username, String password) {
         try {
-            loadUsers();
+            if (username == null || password == null || username.trim().isEmpty() || password.trim().isEmpty()) {
+                return false;
+            }
+
+            JsonArray users = loadUsers();
+            JsonObject user = findUser(users, username);
+
+            if (user == null) {
+                return false;
+            }
+
+            String storedPassword = user.get("password").getAsString();
+            return password.equals(storedPassword);
+
         } catch (Exception e) {
-            throw new IOException("[UserManager] Errore: File 'data/users.json' non è un JSON valido!\n");
+            System.err.println("[UserManager] Errore validazione: " + e.getMessage());
+            return false;
         }
     }
 
-    //Carica la lista degli utenti dal file JSON
-    public static JsonArray loadUsers() throws IOException {
+    public static int updatePassword(String username, String oldPassword, String newPassword, ConcurrentHashMap<Socket, String> socketUserMap) {
         synchronized (FILE_LOCK) {
-            File usersFile = new File(USERS_FILE);
-
-            // Controllo esistenza e dimensione file
-            if (!usersFile.exists() || usersFile.length() == 0) {
-                return new JsonArray(); // File non esiste o è vuoto, lista vuota
-            }
-
-            try (FileReader reader = new FileReader(usersFile)) {
-                JsonObject rootObject = JsonParser.parseReader(reader).getAsJsonObject();
-
-                // Controlla se il file contiene la struttura corretta
-                if (rootObject != null && rootObject.has("users")) {
-                    return rootObject.getAsJsonArray("users");
-                } else {
-                    System.out.println("[UserManager] File users.json non inizializzato");
-                    initializeUsersFile();
-                    return new JsonArray();
+            try {
+                if (!isValidPassword(newPassword)) {
+                    return 101;
                 }
+
+                if (oldPassword.equals(newPassword)) {
+                    return 103;
+                }
+
+                if (isUserLoggedIn(username, socketUserMap)) {
+                    return 104;
+                }
+
+                JsonArray users = loadUsers();
+                JsonObject user = findUser(users, username);
+
+                if (user == null) {
+                    return 102;
+                }
+
+                String storedPassword = user.get("password").getAsString();
+                if (!oldPassword.equals(storedPassword)) {
+                    return 102;
+                }
+
+                user.addProperty("password", newPassword);
+                saveUsers(users);
+
+                System.out.println("[UserManager] Password aggiornata per: " + username);
+                return 100;
+
             } catch (Exception e) {
-                System.err.println("[UserManager] Errore lettura file utenti, reinizializzazione: " + e.getMessage());
-                initializeUsersFile();
-                return new JsonArray();
+                System.err.println("[UserManager] Errore aggiornamento password: " + e.getMessage());
+                return 105;
             }
         }
     }
 
-    //Salva la lista degli utenti nel file JSON
-    public static void saveUsers(JsonArray users) throws IOException {
-        synchronized (FILE_LOCK) {
-            JsonObject rootObject = new JsonObject();
-            rootObject.add("users", users);
-
-            try (FileWriter writer = new FileWriter(USERS_FILE)) {
-                gson.toJson(rootObject, writer);
-            }
+    public static boolean isValidPassword(String password) {
+        if (password == null || password.trim().isEmpty()) {
+            return false;
         }
+        return true;
     }
 
-    //Cerca un utente per username nella lista
+    public static boolean isUserLoggedIn(String username, ConcurrentHashMap<Socket, String> socketUserMap) {
+        if (username == null || socketUserMap == null) {
+            return false;
+        }
+        return socketUserMap.containsValue(username);
+    }
+
     public static JsonObject findUser(JsonArray users, String username) {
         if (username == null) return null;
 
@@ -122,179 +192,60 @@ public class UserManager {
         return null;
     }
 
-    //Controlla se un username esiste già nel sistema
-    public static boolean isUsernameExists(String username) throws IOException {
-        JsonArray users = loadUsers();
-        return findUser(users, username) != null;
-    }
-
-    //Crea un nuovo oggetto utente con i parametri specificati
-    public static JsonObject createUser(String username, String password) {
-        JsonObject newUser = new JsonObject();
-        newUser.addProperty("username", username.trim());
-        newUser.addProperty("password", password);
-        return newUser;
-    }
-
-    //Valida i parametri di registrazione
-    public static int validateRegistrationParams(String username, String password) throws IOException {
-        // Controlla username vuoto o null
-        if (username == null || username.trim().isEmpty()) {
-            return 103;
-        }
-
-        // Controlla password vuota o null
-        if (password == null || password.trim().isEmpty()) {
-            return 101;
-        }
-
-        // Controlla se username già esistente
-        if (isUsernameExists(username)) {
-            return 102;
-        }
-
-        return 100;
-    }
-
-    //Valida i parametri di login
-    public static boolean validateLoginParams(String username, String password) {
-        return username != null && !username.trim().isEmpty() && password != null && !password.trim().isEmpty();
-    }
-
-    //Valida le credenziali di un utente confrontando username e password
-    public static boolean validateCredentials(String username, String password) {
-        try {
-            if (username == null || password == null || username.trim().isEmpty() || password.trim().isEmpty()) {
-                return false;
-            }
-
-            // Carica lista utenti dal file JSON
-            JsonArray users = loadUsers();
-
-            // Cerca l'utente nella lista
-            JsonObject user = findUser(users, username);
-            if (user == null) {
-                return false;
-            }
-
-            // Confronta password
-            String storedPassword = user.get("password").getAsString();
-            return password.equals(storedPassword);
-
-        } catch (Exception e) {
-            System.err.println("[UserManager] Errore validazione credenziali: " + e.getMessage());
-            return false;
-        }
-    }
-
-    //Valida una password secondo i criteri del sistema
-    public static boolean isValidPassword(String password) {
-        if (password == null) {
-            return false;
-        }
-
-        // La password non può essere completamente vuota
-        if (password.trim().isEmpty()) {
-            return false;
-        }
-
-        return true;
-    }
-
-    //Controlla se un utente è attualmente loggato
-    public static boolean isUserLoggedIn(String username, ConcurrentHashMap<Socket, String> socketUserMap) {
-        if (username == null || socketUserMap == null) {
-            return false;
-        }
-        return socketUserMap.containsValue(username);
-    }
-
-    //Aggiorna la password di un utente esistente nel sistema
-    public static int updatePassword(String username, String oldPassword, String newPassword, ConcurrentHashMap<Socket, String> socketUserMap) {
+    public static void saveUsers(JsonArray users) throws IOException {
         synchronized (FILE_LOCK) {
-            try {
-                // Validazione nuova password
-                if (!isValidPassword(newPassword)) {
-                    return 101;
-                }
-
-                // Verifica che nuova password sia diversa dalla vecchia
-                if (oldPassword.equals(newPassword)) {
-                    return 103;
-                }
-
-                // Verifica se utente è attualmente loggato
-                if (isUserLoggedIn(username, socketUserMap)) {
-                    return 104;
-                }
-
-                // Carica lista utenti
-                JsonArray users = loadUsers();
-
-                // Cerca l'utente
-                JsonObject user = findUser(users, username);
-                if (user == null) {
-                    return 102;
-                }
-
-                // Verifica password attuale
-                String storedPassword = user.get("password").getAsString();
-                if (!oldPassword.equals(storedPassword)) {
-                    return 102;
-                }
-
-                // Aggiorna password nell'oggetto utente
-                user.addProperty("password", newPassword);
-
-                // Salva lista utenti aggiornata
-                saveUsers(users);
-
-                System.out.println("[UserManager] Password aggiornata per utente: " + username);
-                return 100;
-
-            } catch (Exception e) {
-                System.err.println("[UserManager] Errore aggiornamento password: " + e.getMessage());
-                return 105;
-            }
-        }
-    }
-
-    //Getter per il path del file utenti
-    public static String getUsersFilePath() {
-        return USERS_FILE;
-    }
-
-    //Getter per l'oggetto lock condiviso
-    public static Object getFileLock() {
-        return FILE_LOCK;
-    }
-
-    //Inizializza il file degli utenti con una struttura JSON vuota
-    private static void initializeUsersFile() throws IOException {
-        JsonObject rootObject = new JsonObject();
-        rootObject.add("users", new JsonArray());
-
-        try (FileWriter writer = new FileWriter(USERS_FILE)) {
-            gson.toJson(rootObject, writer);
-        }
-    }
-
-    //Salva tutti gli utenti correnti dal sistema
-    public static void saveAllUsers() throws IOException {
-        synchronized (FILE_LOCK) {
-            // Carica gli utenti correnti
-            JsonArray users = loadUsers();
-
-            // Salva la lista
             JsonObject rootObject = new JsonObject();
             rootObject.add("users", users);
 
             try (FileWriter writer = new FileWriter(USERS_FILE)) {
                 gson.toJson(rootObject, writer);
-                writer.flush(); // Forza scrittura fisica su disco
+            }
+        }
+    }
+
+    public static void saveAllUsers() throws IOException {
+        synchronized (FILE_LOCK) {
+            JsonArray users = loadUsers();
+
+            JsonObject rootObject = new JsonObject();
+            rootObject.add("users", users);
+
+            try (FileWriter writer = new FileWriter(USERS_FILE)) {
+                gson.toJson(rootObject, writer);
+            }
+        }
+    }
+
+    public static JsonArray loadUsers() throws IOException {
+        synchronized (FILE_LOCK) {
+            File usersFile = new File(USERS_FILE);
+
+            if (!usersFile.exists() || usersFile.length() == 0) {
+                return new JsonArray();
             }
 
-            System.out.println("[UserManager] Salvati " + users.size() + " utenti nel file JSON");
+            try (FileReader reader = new FileReader(usersFile)) {
+                JsonObject rootObject = JsonParser.parseReader(reader).getAsJsonObject();
+
+                if (rootObject != null && rootObject.has("users")) {
+                    return rootObject.getAsJsonArray("users");
+                } else {
+                    initializeUsersFile();
+                    return new JsonArray();
+                }
+            } catch (Exception e) {
+                System.err.println("[UserManager] Errore lettura file: " + e.getMessage());
+                initializeUsersFile();
+                return new JsonArray();
+            }
         }
+    }
+
+    public static String getUsersFilePath() {
+        return USERS_FILE;
+    }
+
+    public static Object getFileLock() {
+        return FILE_LOCK;
     }
 }
