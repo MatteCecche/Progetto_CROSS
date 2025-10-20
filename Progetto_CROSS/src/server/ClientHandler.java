@@ -5,7 +5,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
-import server.utility.UserManager;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,18 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
-/**
- * Gestisce la comunicazione con un singolo client TCP del sistema CROSS
- * Ogni istanza viene eseguita da un thread diverso preso dal pool del server
- * - Gestione del protocollo di comunicazione JSON con il client
- * - Implementazione delle operazioni di autenticazione e gestione account
- * - Sistema di trading completo con OrderManager integration
- * - Registrazione notifiche prezzo multicast
- * - Sincronizzazione con la mappa globale socket-utente per stato login
+import server.utility.UserManager;
+
+/*
+ * Gestisce la comunicazione con un singolo client TCP
  */
 public class ClientHandler implements Runnable {
 
-    // Socket TCP per la comunicazione con il client specifico
+    // Socket TCP per la comunicazione con il client
     private Socket clientSocket;
 
     // Stream di input per ricevere messaggi JSON dal client
@@ -37,16 +32,12 @@ public class ClientHandler implements Runnable {
     // Stream di output per inviare risposte JSON al client
     private PrintWriter out;
 
-    // Gson per parsing e serializzazione JSON
+    // Gson per serializzazione JSON
     private Gson gson;
 
-    // Riferimento alla mappa condivisa socket -> username
+    // Mappa condivisa socket -> username
     private ConcurrentHashMap<Socket, String> socketUserMap;
 
-    // Salva l'ultimo username loggato per il cleanup
-    private String lastLoggedUsername = null;
-
-    //Configura tutte le risorse necessarie per la gestione del client
     public ClientHandler(Socket clientSocket, ConcurrentHashMap<Socket, String> socketUserMap) {
         this.clientSocket = clientSocket;
         this.gson = new Gson();
@@ -55,74 +46,46 @@ public class ClientHandler implements Runnable {
 
     public void run() {
         try {
-            // Inizializza gli stream di comunicazione
-            setupStreams();
+            in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            out = new PrintWriter(clientSocket.getOutputStream(), true);
 
-            // Loop principale di gestione messaggi JSON
             handleClientMessages();
 
         } catch (SocketTimeoutException e) {
-            System.out.println("[ClientHandler] Timeout client: " +
-                    clientSocket.getRemoteSocketAddress());
+            System.out.println("[ClientHandler] Timeout: " + clientSocket.getRemoteSocketAddress());
         } catch (IOException e) {
-            System.err.println("[ClientHandler] Errore comunicazione client: " +
-                    e.getMessage());
+            System.err.println("[ClientHandler] Errore comunicazione: " + e.getMessage());
         } finally {
             cleanup();
         }
     }
 
-    //Inizializza gli stream di input/output per la comunicazione JSON
-    private void setupStreams() throws IOException {
-        in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-        out = new PrintWriter(clientSocket.getOutputStream(), true);
-    }
-
-    //Loop principale che gestisce i messaggi JSON dal client
     private void handleClientMessages() throws IOException {
         String messageJson;
 
         while ((messageJson = in.readLine()) != null) {
             try {
-                // Parsing del messaggio JSON ricevuto
                 JsonObject request = JsonParser.parseString(messageJson).getAsJsonObject();
 
                 if (!request.has("operation")) {
-                    sendErrorResponse(103, "Messaggio JSON non valido: manca campo operation");
+                    sendError(103, "Manca campo operation");
                     continue;
                 }
 
                 String operation = request.get("operation").getAsString();
-
-                // Salva username per il caso logout
-                String userBeforeOperation = getClientInfo();
-
-                // Dispatch dell'operazione al handler specifico
                 JsonObject response = processOperation(operation, request);
 
-                if ("logout".equals(operation)) {
-                    System.out.println("[ClientHandler] Operazione " + operation +
-                            " processata per " + userBeforeOperation);
-                } else {
-                    System.out.println("[ClientHandler] Operazione " + operation +
-                            " processata per " + getClientInfo());
-                }
-
-                // Invio della risposta JSON al client
-                sendResponse(response);
+                out.println(response.toString());
 
             } catch (JsonSyntaxException e) {
-                System.err.println("[ClientHandler] JSON malformato: " + e.getMessage());
-                sendErrorResponse(103, "Formato JSON non valido");
+                sendError(103, "JSON non valido");
             } catch (Exception e) {
-                System.err.println("[ClientHandler] Errore processing operazione: " +
-                        e.getMessage());
-                sendErrorResponse(103, "Errore interno server");
+                System.err.println("[ClientHandler] Errore: " + e.getMessage());
+                sendError(103, "Errore interno");
             }
         }
     }
 
-    //Processa le operazioni ricevute dal client
     private JsonObject processOperation(String operation, JsonObject request) {
         switch (operation) {
             case "login":
@@ -144,161 +107,129 @@ public class ClientHandler implements Runnable {
             case "registerPriceAlert":
                 return handleRegisterPriceAlert(request);
             default:
-                return createErrorResponse(103, "Operazione non supportata: " + operation);
+                return createError(103, "Operazione non supportata");
         }
     }
 
-    //Gestisce il login
     private JsonObject handleLogin(JsonObject request) {
         try {
             if (!request.has("values")) {
-                return createErrorResponse(103, "Messaggio login non valido: manca campo values");
+                return createError(103, "Manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String username = getStringValue(values, "username");
-            String password = getStringValue(values, "password");
+            String username = getString(values, "username");
+            String password = getString(values, "password");
 
-            // Validazione parametri tramite UserManager
             if (!UserManager.validateLoginParams(username, password)) {
-                return createErrorResponse(103, "Parametri login non validi");
+                return createError(103, "Parametri non validi");
             }
 
-            // Controllo se l'utente è già loggato
-            if (isUserAlreadyLoggedIn(username)) {
+            if (socketUserMap.containsValue(username)) {
                 return ResponseBuilder.Login.userAlreadyLogged();
             }
 
-            // Verifica credenziali tramite UserManager
             if (!UserManager.validateCredentials(username, password)) {
                 return ResponseBuilder.Login.wrongCredentials();
             }
 
-            // Login completato
             socketUserMap.put(clientSocket, username);
 
-            // Registra client per notifiche UDP trade
+            // Registra per notifiche UDP
             if (values.has("udpPort")) {
                 try {
                     int udpPort = values.get("udpPort").getAsInt();
                     InetAddress clientIP = clientSocket.getInetAddress();
-                    UDPNotificationService.registerClient(
-                            username,
-                            new InetSocketAddress(clientIP, udpPort)
-                    );
+                    UDPNotificationService.registerClient(username, new InetSocketAddress(clientIP, udpPort));
                 } catch (Exception e) {
                     System.err.println("[ClientHandler] Errore registrazione UDP: " + e.getMessage());
                 }
             }
 
-            System.out.println("[ClientHandler] Login successful: " + username);
-
+            System.out.println("[ClientHandler] Login: " + username);
             return ResponseBuilder.Login.success();
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante login: " + e.getMessage());
-            return createErrorResponse(103, "Errore interno durante login");
+            System.err.println("[ClientHandler] Errore login: " + e.getMessage());
+            return createError(103, "Errore interno");
         }
     }
 
-    //Gestisce il logout
     private JsonObject handleLogout(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
+            String username = socketUserMap.get(clientSocket);
 
-            if (loggedUsername == null) {
-                return createErrorResponse(101, "Nessun utente loggato su questa connessione");
+            if (username == null) {
+                return createError(101, "Nessun utente loggato");
             }
 
-            System.out.println("[ClientHandler] Processando logout per: " + loggedUsername);
-
-            // Rimuovi dalla mappa
             socketUserMap.remove(clientSocket);
+            PriceNotificationService.unregisterUser(username);
+            UDPNotificationService.unregisterClient(username);
 
-            // Rimuovi utente dalle notifiche multicast prima del logout
-            PriceNotificationService.unregisterUser(loggedUsername);
-
-            // Rimuovi dalle notifiche UDP
-            UDPNotificationService.unregisterClient(loggedUsername);
-
-            System.out.println("[ClientHandler] Logout successful: " + loggedUsername);
+            System.out.println("[ClientHandler] Logout: " + username);
             return ResponseBuilder.Logout.success();
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante logout: " + e.getMessage());
-            return createErrorResponse(101, "Errore interno durante logout");
+            System.err.println("[ClientHandler] Errore logout: " + e.getMessage());
+            return createError(101, "Errore interno");
         }
     }
 
-    //Gestisce updateCredentials
     private JsonObject handleUpdateCredentials(JsonObject request) {
         try {
             if (!request.has("values")) {
-                return ResponseBuilder.UpdateCredentials.otherError("Messaggio non valido: manca campo values");
+                return ResponseBuilder.UpdateCredentials.otherError("Manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String username = getStringValue(values, "username");
-            String oldPassword = getStringValue(values, "old_password");
-            String newPassword = getStringValue(values, "new_password");
+            String username = getString(values, "username");
+            String oldPassword = getString(values, "old_password");
+            String newPassword = getString(values, "new_password");
 
-            // Validazione parametri base
-            if (username == null || username.trim().isEmpty() ||
-                    oldPassword == null || oldPassword.trim().isEmpty() ||
-                    newPassword == null || newPassword.trim().isEmpty()) {
+            if (username.isEmpty() || oldPassword.isEmpty() || newPassword.isEmpty()) {
                 return ResponseBuilder.UpdateCredentials.otherError("Parametri non validi");
             }
 
-            // Chiamata al metodo updatePassword con la mappa delle sessioni
-            int resultCode = UserManager.updatePassword(username, oldPassword, newPassword, socketUserMap);
+            int result = UserManager.updatePassword(username, oldPassword, newPassword, socketUserMap);
 
-            // Costruzione risposta basata sul codice ritornato
-            switch (resultCode) {
-                case 100:
-                    return ResponseBuilder.UpdateCredentials.success();
-                case 101:
-                    return ResponseBuilder.UpdateCredentials.invalidPassword();
-                case 102:
-                    return ResponseBuilder.UpdateCredentials.usernameNotFound();
-                case 103:
-                    return ResponseBuilder.UpdateCredentials.passwordEqualToOld();
-                case 104:
-                    return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
-                case 105:
-                default:
-                    return ResponseBuilder.UpdateCredentials.otherError("Errore durante aggiornamento password");
+            switch (result) {
+                case 100: return ResponseBuilder.UpdateCredentials.success();
+                case 101: return ResponseBuilder.UpdateCredentials.invalidPassword();
+                case 102: return ResponseBuilder.UpdateCredentials.usernameNotFound();
+                case 103: return ResponseBuilder.UpdateCredentials.passwordEqualToOld();
+                case 104: return ResponseBuilder.UpdateCredentials.userAlreadyLogged();
+                default: return ResponseBuilder.UpdateCredentials.otherError("Errore aggiornamento");
             }
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore durante updateCredentials: " + e.getMessage());
-            return ResponseBuilder.UpdateCredentials.otherError("Errore interno del server");
+            System.err.println("[ClientHandler] Errore updateCredentials: " + e.getMessage());
+            return ResponseBuilder.UpdateCredentials.otherError("Errore interno");
         }
     }
 
-    //Gestisce insertLimitOrder
     private JsonObject handleInsertLimitOrder(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
                 return ResponseBuilder.Logout.userNotLogged();
             }
+
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String type = getStringValue(values, "type");
-            int size = getIntValue(values, "size");
-            int price = getIntValue(values, "price");
+            String type = getString(values, "type");
+            int size = getInt(values, "size");
+            int price = getInt(values, "price");
 
-            // Chiamata a OrderManager per inserimento
-            int orderId = OrderManager.insertLimitOrder(loggedUsername, type, size, price);
+            int orderId = OrderManager.insertLimitOrder(username, type, size, price);
 
             if (orderId == -1) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
-            // Risposta success con orderId
             return ResponseBuilder.TradingOrder.success(orderId);
 
         } catch (Exception e) {
@@ -307,29 +238,27 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    //Gestisce insertMarketOrder
     private JsonObject handleInsertMarketOrder(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
                 return ResponseBuilder.TradingOrder.error();
             }
+
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String type = getStringValue(values, "type");
-            int size = getIntValue(values, "size");
+            String type = getString(values, "type");
+            int size = getInt(values, "size");
 
-            // Chiamata a OrderManager per inserimento
-            int orderId = OrderManager.insertMarketOrder(loggedUsername, type, size);
+            int orderId = OrderManager.insertMarketOrder(username, type, size);
 
             if (orderId == -1) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
-            // Risposta success con orderId
             JsonObject response = new JsonObject();
             response.addProperty("orderId", orderId);
             return response;
@@ -340,30 +269,28 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    //Gestisce insertStopOrder
     private JsonObject handleInsertStopOrder(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
                 return ResponseBuilder.TradingOrder.error();
             }
+
             if (!request.has("values")) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            String type = getStringValue(values, "type");
-            int size = getIntValue(values, "size");
-            int stopPrice = getIntValue(values, "price");
+            String type = getString(values, "type");
+            int size = getInt(values, "size");
+            int stopPrice = getInt(values, "price");
 
-            // Chiamata a OrderManager per inserimento
-            int orderId = OrderManager.insertStopOrder(loggedUsername, type, size, stopPrice);
+            int orderId = OrderManager.insertStopOrder(username, type, size, stopPrice);
 
             if (orderId == -1) {
                 return ResponseBuilder.TradingOrder.error();
             }
 
-            // Risposta success con orderId
             JsonObject response = new JsonObject();
             response.addProperty("orderId", orderId);
             return response;
@@ -374,23 +301,21 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    //Gestisce cancelOrder
     private JsonObject handleCancelOrder(JsonObject request) {
         try {
-            // Controllo autenticazione
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
-                return createErrorResponse(101, "Utente non loggato");
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
+                return createError(101, "Utente non loggato");
             }
+
             if (!request.has("values")) {
-                return createErrorResponse(101, "Formato richiesta non valido: manca campo values");
+                return createError(101, "Manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
-            int orderId = getIntValue(values, "orderId");
+            int orderId = getInt(values, "orderId");
 
-            // Chiamata a OrderManager per cancellazione
-            int result = OrderManager.cancelOrder(loggedUsername, orderId);
+            int result = OrderManager.cancelOrder(username, orderId);
 
             if (result == 100) {
                 return ResponseBuilder.CancelOrder.success();
@@ -400,223 +325,140 @@ public class ClientHandler implements Runnable {
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore cancelOrder: " + e.getMessage());
-            return createErrorResponse(101, "Errore interno server");
+            return createError(101, "Errore interno");
         }
     }
 
-    //Gestisce getPriceHistory
     private JsonObject handleGetPriceHistory(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
-                return createErrorResponse(101, "Utente non loggato");
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
+                return createError(101, "Utente non loggato");
             }
+
             if (!request.has("values")) {
-                return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
+                return createError(103, "Manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             if (!values.has("month")) {
-                return createErrorResponse(103, "Formato richiesta non valido: manca parametro month");
+                return createError(103, "Manca parametro month");
             }
 
-            String month = getStringValue(values, "month");
+            String month = getString(values, "month");
             if (month.isEmpty()) {
-                return createErrorResponse(103, "Parametro month non può essere vuoto");
+                return createError(103, "Parametro month vuoto");
             }
 
-            System.out.println("[ClientHandler] Richiesta storico prezzi per mese: " + month +
-                    " da utente: " + loggedUsername);
-
-            // Chiamata a OrderManager per ottenere i dati storici
             JsonObject historyData = OrderManager.getPriceHistory(month);
 
-            // Controlla se c'è stato un errore
             if (historyData.has("error")) {
-                return createErrorResponse(103, historyData.get("error").getAsString());
+                return createError(103, historyData.get("error").getAsString());
             }
-
-            System.out.println("[ClientHandler] Storico prezzi generato per " + month +
-                    ": " + historyData.get("totalDays").getAsInt() + " giorni");
 
             return historyData;
 
         } catch (Exception e) {
             System.err.println("[ClientHandler] Errore getPriceHistory: " + e.getMessage());
-            return createErrorResponse(103, "Errore interno del server durante generazione storico");
+            return createError(103, "Errore interno");
         }
     }
 
-    //Gestisce la registrazione di un utente per notifiche di soglia prezzo
     private JsonObject handleRegisterPriceAlert(JsonObject request) {
         try {
-            String loggedUsername = socketUserMap.get(clientSocket);
-            if (loggedUsername == null) {
-                return createErrorResponse(101, "Utente non loggato - effettuare login prima di registrare notifiche");
+            String username = socketUserMap.get(clientSocket);
+            if (username == null) {
+                return createError(101, "Utente non loggato");
             }
+
             if (!request.has("values")) {
-                return createErrorResponse(103, "Formato richiesta non valido: manca campo values");
+                return createError(103, "Manca campo values");
             }
 
             JsonObject values = request.getAsJsonObject("values");
             if (!values.has("thresholdPrice")) {
-                return createErrorResponse(103, "Formato richiesta non valido: manca thresholdPrice");
+                return createError(103, "Manca thresholdPrice");
             }
 
-            // Estrazione e validazione soglia prezzo
             int thresholdPrice;
             try {
                 thresholdPrice = values.get("thresholdPrice").getAsInt();
             } catch (Exception e) {
-                return createErrorResponse(103, "thresholdPrice deve essere un numero intero");
+                return createError(103, "thresholdPrice non valido");
             }
 
             if (thresholdPrice <= 0) {
-                return createErrorResponse(103, "thresholdPrice deve essere maggiore di zero");
+                return createError(103, "thresholdPrice deve essere > 0");
             }
 
-            // Controllo soglia maggiore del prezzo corrente
             int currentPrice = OrderManager.getCurrentMarketPrice();
             if (thresholdPrice <= currentPrice) {
-                return createErrorResponse(103, "thresholdPrice (" + formatPrice(thresholdPrice) +
-                        ") deve essere maggiore del prezzo corrente (" + formatPrice(currentPrice) + ")");
+                return createError(103, "thresholdPrice deve essere maggiore del prezzo corrente");
             }
 
-            // Registrazione utente per notifiche multicast
-            PriceNotificationService.registerUserForPriceNotifications(loggedUsername, thresholdPrice);
+            PriceNotificationService.registerUserForPriceNotifications(username, thresholdPrice);
 
-            // Risposta di successo con info multicast per il client
             JsonObject response = new JsonObject();
             response.addProperty("response", 100);
-            response.addProperty("message", "Registrazione notifiche prezzo completata");
-
-            // Aggiungi info multicast per il client
-            JsonObject multicastInfo = PriceNotificationService.getMulticastInfo();
-            response.add("multicastInfo", multicastInfo);
-
-            System.out.println("[ClientHandler] Utente " + loggedUsername +
-                    " registrato per notifiche prezzo > " + formatPrice(thresholdPrice) + " USD");
+            response.addProperty("message", "Registrazione completata");
+            response.add("multicastInfo", PriceNotificationService.getMulticastInfo());
 
             return response;
 
         } catch (Exception e) {
-            System.err.println("[ClientHandler] Errore registrazione notifiche prezzo: " + e.getMessage());
-            return createErrorResponse(103, "Errore interno durante registrazione notifiche");
+            System.err.println("[ClientHandler] Errore registerPriceAlert: " + e.getMessage());
+            return createError(103, "Errore interno");
         }
     }
 
-    //Controlla se un utente è già loggato
-    private boolean isUserAlreadyLoggedIn(String username) {
-        return socketUserMap.containsValue(username);
-    }
-
-    //Ottiene informazioni sul client
-    private String getClientInfo() {
-        String username = socketUserMap.get(clientSocket);
-        if (username != null) {
-            return username;
-        } else {
-            return "anonymous";
-        }
-    }
-
-    //Estrae valore stringa da JsonObject con gestione errori
-    private String getStringValue(JsonObject json, String key) {
+    private String getString(JsonObject json, String key) {
         try {
-            if (json.has(key)) {
-                return json.get(key).getAsString();
-            } else {
-                return "";
-            }
+            return json.has(key) ? json.get(key).getAsString() : "";
         } catch (Exception e) {
             return "";
         }
     }
 
-    //Estrae valore intero da JsonObject con gestione errori
-    private int getIntValue(JsonObject json, String key) {
+    private int getInt(JsonObject json, String key) {
         try {
-            if (json.has(key)) {
-                return json.get(key).getAsInt();
-            } else {
-                return 0;
-            }
+            return json.has(key) ? json.get(key).getAsInt() : 0;
         } catch (Exception e) {
             return 0;
         }
     }
 
-    //Formatta prezzo in millesimi
-    private String formatPrice(int priceInMillis) {
-        return String.format("%,.0f", priceInMillis / 1000.0);
-    }
-
-    //Crea risposta di successo
-    private JsonObject createSuccessResponse(int code, String message) {
+    private JsonObject createError(int code, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("response", code);
         response.addProperty("errorMessage", message);
         return response;
     }
 
-    //Crea oggetto risposta di errore
-    private JsonObject createErrorResponse(int code, String message) {
-        JsonObject response = new JsonObject();
-        response.addProperty("response", code);
-        response.addProperty("errorMessage", message);
-        return response;
+    private void sendError(int code, String message) {
+        out.println(createError(code, message).toString());
     }
 
-    //Invia risposta JSON al client
-    private void sendResponse(JsonObject response) {
-        out.println(response.toString());
-    }
-
-    //Invia risposta di errore rapida
-    private void sendErrorResponse(int code, String message) {
-        sendResponse(createErrorResponse(code, message));
-    }
-
-    //Rimuove utente dalla mappa degli utenti loggati e dalle notifiche multicast
     private void cleanup() {
         try {
-            // Salva il nome utente PRIMA di rimuoverlo dalla mappa
-            String loggedUsername = socketUserMap.get(clientSocket);
-            String userInfo;
-            if (loggedUsername != null) {
-                userInfo = loggedUsername;
-                PriceNotificationService.unregisterUser(loggedUsername);
-                UDPNotificationService.unregisterClient(loggedUsername);
-            } else if (lastLoggedUsername != null) {
-            // logout esplicito fatto
-            userInfo = lastLoggedUsername;
-        } else {
-            // Nessun login mai fatto
-            userInfo = "anonymous";
-        }
+            String username = socketUserMap.get(clientSocket);
 
-            // Rimuovi utente dalle notifiche multicast se era loggato
-            if (loggedUsername != null) {
-                PriceNotificationService.unregisterUser(loggedUsername);
-                UDPNotificationService.unregisterClient(loggedUsername);
+            if (username != null) {
+                PriceNotificationService.unregisterUser(username);
+                UDPNotificationService.unregisterClient(username);
+                socketUserMap.remove(clientSocket);
+                System.out.println("[ClientHandler] Disconnesso: " + username);
+            } else {
+                System.out.println("[ClientHandler] Disconnesso: anonimo");
             }
 
-            // Rimuovi dalla mappa degli utenti loggati
-            socketUserMap.remove(clientSocket);
-
-            // Chiudi stream
             if (in != null) in.close();
             if (out != null) out.close();
-
-            // Chiudi socket se non già chiuso
             if (clientSocket != null && !clientSocket.isClosed()) {
                 clientSocket.close();
             }
 
-            System.out.println("[ClientHandler] Client disconnesso: " + userInfo);
-
         } catch (IOException e) {
-            System.err.println("[ClientHandler] Errore durante cleanup: " + e.getMessage());
+            System.err.println("[ClientHandler] Errore cleanup: " + e.getMessage());
         }
     }
 }

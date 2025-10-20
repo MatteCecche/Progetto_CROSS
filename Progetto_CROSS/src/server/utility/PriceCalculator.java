@@ -1,22 +1,22 @@
 package server.utility;
 
 import com.google.gson.JsonObject;
+
 import java.util.List;
 
-//Gestisce i calcoli relativi ai prezzi nel sistema CROSS
+/*
+ * Calcoli e formattazioni per i prezzi
+ */
 public class PriceCalculator {
 
-    //Formatta prezzo da millesimi USD a formato leggibile
     public static String formatPrice(int priceInMilliths) {
         return String.format("%,.0f", priceInMilliths / 1000.0);
     }
 
-    //Formatta size da millesimi BTC a formato leggibile
     public static String formatSize(int sizeInMilliths) {
         return String.format("%.3f", sizeInMilliths / 1000.0);
     }
 
-    //Calcola OHLC (Open, High, Low, Close) per un singolo giorno
     public static JsonObject calculateDayOHLC(List<JsonObject> dayTrades, String date) {
         if (dayTrades == null || dayTrades.isEmpty()) {
             JsonObject emptyDay = new JsonObject();
@@ -32,46 +32,29 @@ public class PriceCalculator {
             return emptyDay;
         }
 
-        // Ordina trade per timestamp
-        dayTrades.sort((a, b) -> Long.compare(
-                a.get("timestamp").getAsLong(),
-                b.get("timestamp").getAsLong()
-        ));
+        dayTrades.sort((a, b) -> Long.compare(a.get("timestamp").getAsLong(), b.get("timestamp").getAsLong()));
 
-        // Calcolo OHLC
-        int openPrice = dayTrades.get(0).get("price").getAsInt();  // Primo trade
-        int closePrice = dayTrades.get(dayTrades.size() - 1).get("price").getAsInt();  // Ultimo trade
+        int openPrice = dayTrades.get(0).get("price").getAsInt();
 
-        int highPrice = dayTrades.stream()
-                .mapToInt(trade -> trade.get("price").getAsInt())
-                .max().orElse(openPrice);
+        int closePrice = dayTrades.get(dayTrades.size() - 1).get("price").getAsInt();
 
-        int lowPrice = dayTrades.stream()
-                .mapToInt(trade -> trade.get("price").getAsInt())
-                .min().orElse(openPrice);
+        int highPrice = dayTrades.stream().mapToInt(trade -> trade.get("price").getAsInt()).max().orElse(openPrice);
 
-        // Calcolo volume totale e conteggi
-        int totalVolume = dayTrades.stream()
-                .mapToInt(trade -> trade.get("size").getAsInt())
-                .sum();
+        int lowPrice = dayTrades.stream().mapToInt(trade -> trade.get("price").getAsInt()).min().orElse(openPrice);
 
-        // Conteggio trade per tipo (se disponibile)
-        long bidTrades = dayTrades.stream()
-                .filter(trade -> trade.has("type") && "bid".equals(trade.get("type").getAsString()))
-                .count();
+        int totalVolume = dayTrades.stream().mapToInt(trade -> trade.get("size").getAsInt()).sum();
 
-        long askTrades = dayTrades.stream()
-                .filter(trade -> trade.has("type") && "ask".equals(trade.get("type").getAsString()))
-                .count();
+        long bidTrades = dayTrades.stream().filter(trade -> trade.has("type") && "bid".equals(trade.get("type").getAsString())).count();
 
-        // Costruisce JsonObject
+        long askTrades = dayTrades.stream().filter(trade -> trade.has("type") && "ask".equals(trade.get("type").getAsString())).count();
+
         JsonObject dayData = new JsonObject();
         dayData.addProperty("date", date);
-        dayData.addProperty("openPrice", openPrice);     // Prezzo di apertura
-        dayData.addProperty("highPrice", highPrice);     // Prezzo massimo
-        dayData.addProperty("lowPrice", lowPrice);       // Prezzo minimo
-        dayData.addProperty("closePrice", closePrice);   // Prezzo di chiusura
-        dayData.addProperty("volume", totalVolume);      // Volume totale scambiato
+        dayData.addProperty("openPrice", openPrice);
+        dayData.addProperty("highPrice", highPrice);
+        dayData.addProperty("lowPrice", lowPrice);
+        dayData.addProperty("closePrice", closePrice);
+        dayData.addProperty("volume", totalVolume);
         dayData.addProperty("tradesCount", dayTrades.size());
         dayData.addProperty("bidTrades", (int)bidTrades);
         dayData.addProperty("askTrades", (int)askTrades);
@@ -79,30 +62,12 @@ public class PriceCalculator {
         return dayData;
     }
 
-    //Determina se un prezzo di stop è valido rispetto al prezzo corrente
     public static boolean isValidStopPrice(String type, int stopPrice, int currentPrice) {
         if ("bid".equals(type)) {
-            // Stop Buy: deve essere maggiore del prezzo corrente
             return stopPrice > currentPrice;
         } else if ("ask".equals(type)) {
-            // Stop Sell: deve essere minore del prezzo corrente
             return stopPrice < currentPrice;
         }
-
-        return false; // Tipo non riconosciuto
-    }
-
-    //Verifica se due prezzi sono considerati diversi
-    public static boolean isSignificantPriceChange(int oldPrice, int newPrice, double thresholdPercent) {
-        if (oldPrice == 0) return true; // Prima inizializzazione
-
-        double percentChange = Math.abs((double)(newPrice - oldPrice) / oldPrice) * 100;
-        return percentChange >= thresholdPercent;
-    }
-
-    //Calcola la percentuale di variazione tra due prezzi
-    public static double calculatePriceChangePercent(int fromPrice, int toPrice) {
-        if (fromPrice == 0) return 0.0;
-        return ((double)(toPrice - fromPrice) / fromPrice) * 100;
+        return false;
     }
 }

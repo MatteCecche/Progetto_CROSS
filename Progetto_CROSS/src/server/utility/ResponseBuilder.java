@@ -2,19 +2,12 @@ package server.utility;
 
 import com.google.gson.JsonObject;
 
-/**
- * Utility class per la costruzione standardizzata delle risposte JSON
- * Implementa i formati esatti richiesti con codici specifici per ogni operazione
+/*
+ * Costruisce le risposte JSON standardizzate per le operazioni
  */
 public class ResponseBuilder {
 
-    /**
-     * REGISTER
-     * 100 - OK
-     * 101 - invalid password
-     * 102 - username not available
-     * 103 - other error cases
-     */
+    // REGISTER: 100=OK, 101=invalid password, 102=username not available, 103=other
     public static class Register {
         public static JsonObject success() {
             JsonObject response = new JsonObject();
@@ -45,15 +38,7 @@ public class ResponseBuilder {
         }
     }
 
-    /**
-     * UPDATE CREDENTIALS
-     * 100 - OK
-     * 101 - invalid new password
-     * 102 - username/old_password mismatch or non existent username
-     * 103 - new password equal to old one
-     * 104 - user currently logged in
-     * 105 - other error cases
-     */
+    // UPDATE CREDENTIALS: 100=OK, 101=invalid password, 102=wrong credentials, 103=same password, 104=logged, 105=other
     public static class UpdateCredentials {
         public static JsonObject success() {
             JsonObject response = new JsonObject();
@@ -98,13 +83,7 @@ public class ResponseBuilder {
         }
     }
 
-    /**
-     * LOGIN
-     * 100 - OK
-     * 101 - wrong credentials
-     * 102 - user already logged
-     * 103 - other error cases
-     */
+    // LOGIN: 100=OK, 101=wrong credentials, 102=already logged, 103=other
     public static class Login {
         public static JsonObject success() {
             JsonObject response = new JsonObject();
@@ -135,12 +114,7 @@ public class ResponseBuilder {
         }
     }
 
-    /**
-     * LOGOUT
-     * 100 - OK
-     * 101 - user not logged
-     * 103 - other error cases
-     */
+    // LOGOUT: 100=OK, 101=not logged, 103=other
     public static class Logout {
         public static JsonObject success() {
             JsonObject response = new JsonObject();
@@ -164,11 +138,7 @@ public class ResponseBuilder {
         }
     }
 
-    /**
-     * INSERT LIMIT/MARKET/STOP ORDER
-     * Successo: {"orderId": NUMBER}
-     * Errore: {"orderId": -1} (o messaggio di errore)
-     */
+    // TRADING ORDER: success ritorna orderId, error ritorna -1
     public static class TradingOrder {
         public static JsonObject success(int orderId) {
             JsonObject response = new JsonObject();
@@ -189,11 +159,7 @@ public class ResponseBuilder {
         }
     }
 
-    /**
-     * CANCEL ORDER
-     * 100 - OK
-     * 101 - order error (non esistente, già eseguito, non di proprietà)
-     */
+    // CANCEL ORDER: 100=OK, 101=error
     public static class CancelOrder {
         public static JsonObject success() {
             JsonObject response = new JsonObject();
@@ -210,16 +176,10 @@ public class ResponseBuilder {
         }
     }
 
-    //Crea risposta generica con codice e messaggio custom
     public static JsonObject createGenericResponse(int code, String message) {
         JsonObject response = new JsonObject();
         response.addProperty("response", code);
         response.addProperty("errorMessage", message);
         return response;
-    }
-
-    //Verifica se un codice rappresenta successo (100)
-    public static boolean isSuccessCode(int code) {
-        return code == 100;
     }
 }
