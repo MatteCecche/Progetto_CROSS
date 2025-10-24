@@ -135,7 +135,6 @@ public class ClientHandler implements Runnable {
 
             socketUserMap.put(clientSocket, username);
 
-            // Registra per notifiche UDP
             if (values.has("udpPort")) {
                 try {
                     int udpPort = values.get("udpPort").getAsInt();

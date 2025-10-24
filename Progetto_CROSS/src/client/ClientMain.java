@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -26,36 +27,58 @@ import common.RegistrazioneRMI;
  */
 public class ClientMain {
 
+    // Controllo stato client
     private static volatile boolean running = true;
 
-    // Connessione TCP
+    // Socket TCP per la connessione
     private static Socket tcpSocket;
+
+    // Stream di input per leggere le risposte dal server
     private static BufferedReader in;
+
+    // Stream di output per inviare richieste al server
     private static PrintWriter out;
 
+    // Thread pool per gestione client
     private static ExecutorService pool;
+
+    //Scanner per lettura input dal terminale
     private static Scanner userScanner;
 
-    // Listener notifiche
+    // Listener per messaggi multicast relativi alle notifiche di soglia prezzo
     private static MulticastListener multicastListener;
+
+    // Thread dedicato per esecuzione del listener multicast
     private static Thread multicastThread;
+
+    // Listener UDP per notifiche asincrone di esecuzione ordini
     private static UDPNotificationListener udpListener;
+
+    // Thread dedicato per esecuzione del listener UDP
     private static Thread udpListenerThread;
 
-    // Configurazione
+    // Porta UDP locale su cui il client riceve notifiche di trade dal server
     private static int udpNotificationPort;
+
+    // Username dell'utente attualmente autenticato nel sistema
     private static String currentLoggedUsername;
+
+    // Indirizzo IP del gruppo multicast per notifiche soglia prezzo
     private static String multicastAddress;
+
+    // Porta del gruppo multicast per notifiche soglia prezzo
     private static int multicastPort;
 
+    private static final Gson gson = new Gson();
+
     public static void main(String[] args) {
-        System.out.println("[Client] Avvio Client CROSS");
+        System.out.println("Avvio Client CROSS");
 
         Properties config;
         try {
             config = loadConfiguration();
         } catch (IOException e) {
-            System.err.println("[Client] Errore caricamento config: " + e.getMessage());
+            System.err.println("Errore caricamento config: " + e.getMessage());
             System.exit(1);
             return;
         }
@@ -73,7 +96,7 @@ public class ClientMain {
             udpNotificationPort = parseInt(config, "UDP.notification.port");
 
         } catch (IllegalArgumentException e) {
-            System.err.println("[Client] Errore parsing config: " + e.getMessage());
+            System.err.println("Errore parsing config: " + e.getMessage());
             System.exit(1);
             return;
         }
@@ -84,7 +107,7 @@ public class ClientMain {
             startUserInterface(serverHost, tcpPort, rmiPort, socketTimeout);
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("Errore: " + e.getMessage());
         } finally {
             shutdown();
         }
@@ -126,11 +149,11 @@ public class ClientMain {
     }
 
     private static void startUserInterface(String serverHost, int tcpPort, int rmiPort, int socketTimeout) {
-        System.out.println("\n=== CROSS: an exChange oRder bOokS Service ===");
-        System.out.println("Digitare 'help' per lista comandi\n");
+        System.out.println("=== CROSS: an exChange oRder bOokS Service ===");
+        System.out.println("Digitare 'help' per lista comandi");
 
         while (running) {
-            System.out.print(">> ");
+            System.out.print("\r>> ");
             String inputLine = userScanner.nextLine().trim();
 
             if (inputLine.isEmpty()) {
@@ -189,19 +212,22 @@ public class ClientMain {
     }
 
     private static void printHelp() {
-        System.out.println("\n=== COMANDI ===");
-        System.out.println("help");
-        System.out.println("register <username> <password>");
-        System.out.println("login <username> <password>");
-        System.out.println("logout");
-        System.out.println("updateCredentials <username> <old_pwd> <new_pwd>");
-        System.out.println("insertLimitOrder <bid/ask> <size> <price>");
-        System.out.println("insertMarketOrder <bid/ask> <size>");
-        System.out.println("insertStopOrder <bid/ask> <size> <stopPrice>");
-        System.out.println("cancelOrder <orderId>");
-        System.out.println("getPriceHistory <MMYYYY>");
-        System.out.println("registerPriceAlert <soglia>");
-        System.out.println("esci\n");
+        System.out.println("\n" + repeat("=", 65));
+        System.out.println("=                      COMANDI DISPONIBILI                      =");
+        System.out.println(repeat("=", 65));
+        System.out.println("=  help                                                         =");
+        System.out.println("=  register <username> <password>                               =");
+        System.out.println("=  login <username> <password>                                  =");
+        System.out.println("=  logout                                                       =");
+        System.out.println("=  updateCredentials <username> <old_pwd> <new_pwd>             =");
+        System.out.println("=  insertLimitOrder <bid/ask> <size> <price>                    =");
+        System.out.println("=  insertMarketOrder <bid/ask> <size>                           =");
+        System.out.println("=  insertStopOrder <bid/ask> <size> <stopPrice>                 =");
+        System.out.println("=  cancelOrder <orderId>                                        =");
+        System.out.println("=  getPriceHistory <MMYYYY>                                     =");
+        System.out.println("=  registerPriceAlert <soglia>                                  =");
+        System.out.println("=  esci                                                         =");
+        System.out.println(repeat("=", 65));
     }
 
     private static void handleRegistration(String[] parts, String serverHost, int rmiPort) {
@@ -242,7 +268,7 @@ public class ClientMain {
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore registrazione: " + e.getMessage());
+            System.err.println("Errore registrazione: " + e.getMessage());
         }
     }
 
@@ -266,47 +292,51 @@ public class ClientMain {
                 return;
             }
 
+            int udpPort = startUDPListener(username);
+            if (udpPort == -1) {
+                System.out.println("Errore avvio listener UDP");
+                return;
+            }
+
             tcpSocket = new Socket(serverHost, tcpPort);
             tcpSocket.setSoTimeout(socketTimeout);
             in = new BufferedReader(new InputStreamReader(tcpSocket.getInputStream()));
             out = new PrintWriter(tcpSocket.getOutputStream(), true);
 
-            int actualUdpPort = startUDPListener(username);
-            if (actualUdpPort == -1) {
-                System.err.println("Impossibile avviare listener UDP");
-                closeConnection();
-                return;
-            }
-
-            JsonObject loginRequest = new JsonObject();
-            loginRequest.addProperty("operation", "login");
+            JsonObject request = new JsonObject();
+            request.addProperty("operation", "login");
 
             JsonObject values = new JsonObject();
             values.addProperty("username", username);
             values.addProperty("password", password);
-            values.addProperty("udpPort", actualUdpPort);
-            loginRequest.add("values", values);
+            values.addProperty("udpPort", udpPort);
 
-            out.println(loginRequest.toString());
+            request.add("values", values);
 
-            String responseLine = in.readLine();
-            if (responseLine == null) {
-                System.err.println("Server ha chiuso la connessione");
+            out.println(request.toString());
+
+            String responseJson = in.readLine();
+            if (responseJson == null) {
+                System.out.println("Errore: nessuna risposta dal server");
                 stopUDPListener();
                 closeConnection();
                 return;
             }
 
-            JsonObject response = JsonParser.parseString(responseLine).getAsJsonObject();
+            JsonObject response = JsonParser.parseString(responseJson).getAsJsonObject();
             int responseCode = response.get("response").getAsInt();
 
-            boolean loginSuccessful = false;
+            boolean loginSuccessful = (responseCode == 100);
 
             switch (responseCode) {
                 case 100:
-                    System.out.println("Login effettuato come: " + username);
+                    System.out.println("Login effettuato con successo");
                     currentLoggedUsername = username;
-                    loginSuccessful = true;
+                    if (udpNotificationPort == 0) {
+                        System.out.println("Porta automatica assegnata: " + udpPort);
+                    } else {
+                        System.out.println("In ascolto sulla porta " + udpPort);
+                    }
                     break;
                 case 101:
                     System.out.println("Errore: credenziali non valide");
@@ -332,7 +362,7 @@ public class ClientMain {
             startUDPThread();
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore login: " + e.getMessage());
+            System.err.println("Errore login: " + e.getMessage());
             stopUDPListener();
             closeConnection();
         }
@@ -344,7 +374,7 @@ public class ClientMain {
             udpListener.start();
             return udpListener.getActualPort();
         } catch (Exception e) {
-            System.err.println("[Client] Errore UDP: " + e.getMessage());
+            System.err.println("Errore UDP: " + e.getMessage());
             return -1;
         }
     }
@@ -377,7 +407,7 @@ public class ClientMain {
             in = null;
             out = null;
         } catch (IOException e) {
-            System.err.println("[Client] Errore chiusura: " + e.getMessage());
+            System.err.println("Errore chiusura: " + e.getMessage());
         }
     }
 
@@ -419,7 +449,7 @@ public class ClientMain {
             cleanup();
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore logout: " + e.getMessage());
+            System.err.println("Errore logout: " + e.getMessage());
             cleanup();
         }
     }
@@ -432,9 +462,13 @@ public class ClientMain {
     }
 
     private static void handleUpdateCredentials(String[] parts) {
+        Socket tempSocket = null;
+        BufferedReader tempIn = null;
+        PrintWriter tempOut = null;
+
         try {
             if (parts.length != 4) {
-                System.out.println("Errore: updateCredentials <username> <old_pwd> <new_pwd>");
+                System.out.println("updateCredentials <username> <old_pwd> <new_pwd>");
                 return;
             }
 
@@ -442,10 +476,21 @@ public class ClientMain {
             String oldPassword = parts[2];
             String newPassword = parts[3];
 
-            if (tcpSocket == null || tcpSocket.isClosed()) {
-                System.out.println("Errore: effettuare login prima");
+            if (currentLoggedUsername != null) {
+                System.out.println("Errore: non puoi cambiare password mentre sei loggato");
                 return;
             }
+
+            // Configurazione connessione temporanea
+            String serverHost = "localhost";
+            int tcpPort = 5050;
+            int socketTimeout = 180000;
+
+            // Connessione temporanea
+            tempSocket = new Socket(serverHost, tcpPort);
+            tempSocket.setSoTimeout(socketTimeout);
+            tempIn = new BufferedReader(new InputStreamReader(tempSocket.getInputStream()));
+            tempOut = new PrintWriter(tempSocket.getOutputStream(), true);
 
             JsonObject request = new JsonObject();
             request.addProperty("operation", "updateCredentials");
@@ -456,35 +501,33 @@ public class ClientMain {
             values.addProperty("new_password", newPassword);
             request.add("values", values);
 
-            out.println(request.toString());
+            tempOut.println(request.toString());
 
-            String responseStr = in.readLine();
+            String responseStr = tempIn.readLine();
             if (responseStr == null) {
-                System.out.println("Connessione persa");
+                System.out.println("Errore: nessuna risposta dal server");
                 return;
             }
 
             JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
             int responseCode = response.get("response").getAsInt();
 
-            switch (responseCode) {
-                case 100:
-                    System.out.println("Password aggiornata!");
-                    break;
-                case 101:
-                case 102:
-                case 103:
-                case 104:
-                case 105:
-                    String msg = response.has("errorMessage") ? response.get("errorMessage").getAsString() : "";
-                    System.out.println("Errore: " + msg);
-                    break;
-                default:
-                    System.out.println("Errore sconosciuto (codice " + responseCode + ")");
+            if (responseCode == 100) {
+                System.out.println("Password aggiornata con successo!");
+            } else {
+                System.out.println("Errore aggiornamento password");
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("Errore: " + e.getMessage());
+        } finally {
+            try {
+                if (tempIn != null) tempIn.close();
+                if (tempOut != null) tempOut.close();
+                if (tempSocket != null) tempSocket.close();
+            } catch (IOException e) {
+                // Ignora
+            }
         }
     }
 
@@ -550,7 +593,7 @@ public class ClientMain {
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("Errore: " + e.getMessage());
         }
     }
 
@@ -614,7 +657,7 @@ public class ClientMain {
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("Errore: " + e.getMessage());
         }
     }
 
@@ -680,7 +723,7 @@ public class ClientMain {
             }
 
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("Errore: " + e.getMessage());
         }
     }
 
@@ -803,8 +846,13 @@ public class ClientMain {
         int totalDays = response.get("totalDays").getAsInt();
         JsonArray historyData = response.getAsJsonArray("priceHistory");
 
+        String monthName = convertMonthToName(month);
+
         System.out.println("\n" + repeat("=", 80));
-        System.out.println("STORICO PREZZI - " + month);
+
+        String title = "STORICO PREZZI - " + monthName;
+        int padding = (80 - title.length()) / 2;
+        System.out.println(repeat(" ", padding) + title);
         System.out.println(repeat("=", 80));
 
         if (totalDays == 0) {
@@ -831,28 +879,59 @@ public class ClientMain {
         System.out.println(repeat("=", 80));
     }
 
+    //Converte formato mese da MMYYYY a nome scritto
+    private static String convertMonthToName(String monthCode) {
+        if (monthCode == null || monthCode.length() != 6) {
+            return monthCode;
+        }
+
+        String monthNum = monthCode.substring(0, 2);
+        String year = monthCode.substring(2, 6);
+
+        String[] monthNames = {
+                "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
+                "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
+        };
+
+        try {
+            int month = Integer.parseInt(monthNum);
+            if (month >= 1 && month <= 12) {
+                return monthNames[month - 1] + " " + year;
+            }
+        } catch (NumberFormatException e) {
+            // se parsing fallisce, ritorna il codice originale
+        }
+
+        return monthCode;
+    }
+
     private static void handleRegisterPriceAlert(String[] parts) {
         try {
-            if (tcpSocket == null || tcpSocket.isClosed() || currentLoggedUsername == null) {
+
+            if (tcpSocket == null || tcpSocket.isClosed()) {
                 System.out.println("Errore: effettuare login prima");
                 return;
             }
 
+            if (currentLoggedUsername == null) {
+                System.out.println("Errore: devi essere loggato per registrare un alert");
+                return;
+            }
+
+            if (multicastListener == null) {
+                System.out.println("Errore: listener multicast non attivo");
+                return;
+            }
+
             if (parts.length != 2) {
-                System.out.println("Errore: registerPriceAlert <soglia>");
+                System.out.println("Uso: registerPriceAlert <threshold>");
                 return;
             }
 
-            int thresholdPrice;
-            try {
-                thresholdPrice = Integer.parseInt(parts[1]);
-            } catch (NumberFormatException e) {
-                System.out.println("Soglia deve essere un numero");
-                return;
-            }
+            int threshold = Integer.parseInt(parts[1]);
 
-            if (thresholdPrice <= 0) {
-                System.out.println("Soglia deve essere maggiore di zero");
+            if (threshold <= 0) {
+                System.out.println("Errore: la soglia deve essere un valore positivo");
                 return;
             }
 
@@ -860,37 +939,45 @@ public class ClientMain {
             request.addProperty("operation", "registerPriceAlert");
 
             JsonObject values = new JsonObject();
-            values.addProperty("thresholdPrice", thresholdPrice);
+            values.addProperty("threshold", threshold);
             request.add("values", values);
 
             out.println(request.toString());
-            String responseStr = in.readLine();
 
+            String responseStr = in.readLine();
             if (responseStr == null) {
-                System.out.println("Connessione persa");
+                System.out.println("Errore: connessione chiusa dal server");
+                closeConnection();
                 return;
             }
 
             JsonObject response = JsonParser.parseString(responseStr).getAsJsonObject();
             int responseCode = response.get("response").getAsInt();
 
-            switch (responseCode) {
-                case 100:
-                    System.out.println("Notifica prezzo registrata: " + formatPrice(thresholdPrice));
-                    break;
-                case 101:
-                    System.out.println("Errore: non loggato");
-                    break;
-                case 103:
-                    System.out.println("Errore: parametri non validi");
-                    break;
-                default:
-                    System.out.println("Errore (codice " + responseCode + ")");
-                    break;
+            if (responseCode == 100) {
+                double thresholdUSD = threshold / 1000.0;
+                System.out.println("\n" + repeat("=", 70));
+                System.out.println("           ALERT PREZZO REGISTRATO CON SUCCESSO");
+                System.out.println(repeat("=", 70));
+                System.out.println();
+                System.out.printf("  %-20s : $%,.2f USD%n", "Soglia impostata", thresholdUSD);
+                System.out.printf("  %-20s : Multicast UDP%n", "Tipo notifica");
+                System.out.printf("  %-20s : %s%n", "Gruppo multicast", multicastAddress + ":" + multicastPort);
+                System.out.println();
+                System.out.println(repeat("=", 70));
+                System.out.println();
+
+            } else {
+                System.out.println("Errore registrazione alert");
             }
 
+        } catch (NumberFormatException e) {
+            System.out.println("Errore: threshold deve essere un numero intero");
+        } catch (IOException e) {
+            System.err.println("[Client] Errore I/O: " + e.getMessage());
+            closeConnection();
         } catch (Exception e) {
-            System.err.println("[Client] Errore: " + e.getMessage());
+            System.err.println("[Client] Errore registerPriceAlert: " + e.getMessage());
         }
     }
 

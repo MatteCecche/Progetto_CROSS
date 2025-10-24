@@ -15,7 +15,7 @@ public class UDPNotificationListener implements Runnable {
     // Socket UDP per ricezione messaggi
     private DatagramSocket udpSocket;
 
-    // Porta UDP richiesta (0 = porta automatica)
+    // Porta UDP richiesta
     private final int requestedPort;
 
     // Porta UDP effettiva
@@ -39,15 +39,8 @@ public class UDPNotificationListener implements Runnable {
             udpSocket = new DatagramSocket(requestedPort);
             actualPort = udpSocket.getLocalPort();
             running = true;
-
-            if (requestedPort == 0) {
-                System.out.println("[UDPListener] Porta automatica assegnata: " + actualPort);
-            } else {
-                System.out.println("[UDPListener] In ascolto sulla porta " + actualPort);
-            }
-
         } catch (Exception e) {
-            System.err.println("[UDPListener] Errore avvio: " + e.getMessage());
+            System.err.println("Errore avvio: " + e.getMessage());
             throw e;
         }
     }
@@ -69,7 +62,7 @@ public class UDPNotificationListener implements Runnable {
 
             } catch (Exception e) {
                 if (running) {
-                    System.err.println("[UDPListener] Errore ricezione: " + e.getMessage());
+                    System.err.println("Errore ricezione: " + e.getMessage());
                 }
             }
         }
@@ -91,47 +84,41 @@ public class UDPNotificationListener implements Runnable {
             }
 
         } catch (Exception e) {
-            System.err.println("[UDPListener] Errore processing: " + e.getMessage());
+            System.err.println("Errore processing: " + e.getMessage());
         }
     }
 
     private void displayTrades(JsonArray trades) {
-        System.out.println("\n" + repeat("=", 60));
-        System.out.println("TRADE ESEGUITO");
-        System.out.println(repeat("=", 60));
+        System.out.println("\n" + repeat("=", 80));
+        System.out.println("                          TRADE ESEGUITI");
+        System.out.println(repeat("=", 80));
+        System.out.printf("%-10s %-12s %-15s %-20s %-20s%n", "Order ID", "Tipo", "Quantità", "Prezzo", "Controparte");
+        System.out.println(repeat("-", 80));
 
         for (int i = 0; i < trades.size(); i++) {
             JsonObject trade = trades.get(i).getAsJsonObject();
-
             int orderId = trade.get("orderId").getAsInt();
             String type = trade.get("type").getAsString();
+            String tipoStr = type.equals("bid") ? "ACQUISTO" : "VENDITA";
             int size = trade.get("size").getAsInt();
             int price = trade.get("price").getAsInt();
-
-            System.out.println("\nOrder ID: " + orderId);
-            System.out.println("Tipo: " + (type.equals("bid") ? "ACQUISTO" : "VENDITA"));
-            System.out.println("Quantita: " + formatSize(size) + " BTC");
-            System.out.println("Prezzo: " + formatPrice(price) + " USD");
-
-            if (trade.has("counterparty")) {
-                System.out.println("Controparte: " + trade.get("counterparty").getAsString());
-            }
+            String counterparty = trade.has("counterparty") ? trade.get("counterparty").getAsString() : "N/A";
+            System.out.printf("%-10d %-12s %-15s %-20s %-20s%n", orderId, tipoStr, formatSize(size) + " BTC", formatPrice(price) + " USD", counterparty);
         }
 
-        System.out.println("\n" + repeat("=", 60));
+        System.out.println(repeat("=", 80));
         System.out.print(">> ");
         System.out.flush();
     }
 
     public void stop() {
         running = false;
-
         try {
             if (udpSocket != null && !udpSocket.isClosed()) {
                 udpSocket.close();
             }
         } catch (Exception e) {
-            System.err.println("[UDPListener] Errore stop: " + e.getMessage());
+            System.err.println("Errore stop: " + e.getMessage());
         }
     }
 
@@ -144,7 +131,7 @@ public class UDPNotificationListener implements Runnable {
     }
 
     private String repeat(String str, int times) {
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(str.length() * times);
         for (int i = 0; i < times; i++) {
             sb.append(str);
         }

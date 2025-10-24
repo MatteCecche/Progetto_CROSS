@@ -4,7 +4,13 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import java.io.IOException;
-import java.net.*;
+import java.net.DatagramPacket;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.MulticastSocket;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
 
 /*
  * Listener per notifiche multicast di soglie prezzo
@@ -45,10 +51,10 @@ public class MulticastListener implements Runnable {
             multicastSocket.joinGroup(group, netInterface);
             running = true;
 
-            System.out.println("[Multicast] In ascolto su " + multicastAddress + ":" + multicastPort);
+            System.out.println("In ascolto su " + multicastAddress + ":" + multicastPort);
 
         } catch (IOException e) {
-            System.err.println("[Multicast] Errore avvio: " + e.getMessage());
+            System.err.println("Errore avvio: " + e.getMessage());
             throw e;
         }
     }
@@ -60,7 +66,6 @@ public class MulticastListener implements Runnable {
                 return loopback;
             }
         } catch (Exception e) {
-            // Fallback
         }
 
         try {
@@ -70,7 +75,6 @@ public class MulticastListener implements Runnable {
         }
     }
 
-    @Override
     public void run() {
         byte[] buffer = new byte[1024];
 
@@ -87,7 +91,7 @@ public class MulticastListener implements Runnable {
                 continue;
             } catch (IOException e) {
                 if (running) {
-                    System.err.println("[Multicast] Errore ricezione: " + e.getMessage());
+                    System.err.println("Errore ricezione: " + e.getMessage());
                 }
             }
         }
@@ -108,7 +112,7 @@ public class MulticastListener implements Runnable {
             }
 
         } catch (Exception e) {
-            System.err.println("[Multicast] Errore processing: " + e.getMessage());
+            System.err.println("Errore processing: " + e.getMessage());
         }
     }
 
@@ -149,6 +153,7 @@ public class MulticastListener implements Runnable {
     }
 
     private String formatPrice(int priceInMillis) {
+
         return String.format("%,.0f", priceInMillis / 1000.0);
     }
 

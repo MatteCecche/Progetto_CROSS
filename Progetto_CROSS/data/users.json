@@ -27,6 +27,26 @@
     {
       "username": "fabio",
       "password": "56"
+    },
+    {
+      "username": "alice",
+      "password": "password123"
+    },
+    {
+      "username": "bob",
+      "password": "123"
+    },
+    {
+      "username": "1",
+      "password": "1"
+    },
+    {
+      "username": "2",
+      "password": "2"
+    },
+    {
+      "username": "3",
+      "password": "3"
     }
   ]
 }
