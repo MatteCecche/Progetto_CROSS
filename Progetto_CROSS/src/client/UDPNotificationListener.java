@@ -6,11 +6,16 @@ import com.google.gson.JsonParser;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.nio.charset.StandardCharsets;
 
 /*
  * Listener per notifiche UDP dal server
  */
 public class UDPNotificationListener implements Runnable {
+
+    // stringhe per separatori messaggi
+    private static final String SEPARATOR_EQUALS = "================================================================================";
+    private static final String SEPARATOR_DASHES = "--------------------------------------------------------------------------------";
 
     // Socket UDP per ricezione messaggi
     private DatagramSocket udpSocket;
@@ -39,6 +44,7 @@ public class UDPNotificationListener implements Runnable {
             udpSocket = new DatagramSocket(requestedPort);
             actualPort = udpSocket.getLocalPort();
             running = true;
+            System.out.println("[" + username + "] UDP Listener avviato sulla porta " + actualPort);
         } catch (Exception e) {
             System.err.println("Errore avvio: " + e.getMessage());
             throw e;
@@ -57,7 +63,7 @@ public class UDPNotificationListener implements Runnable {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 udpSocket.receive(packet);
 
-                String message = new String(packet.getData(), 0, packet.getLength(), "UTF-8");
+                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
                 processNotification(message);
 
             } catch (Exception e) {
@@ -89,24 +95,31 @@ public class UDPNotificationListener implements Runnable {
     }
 
     private void displayTrades(JsonArray trades) {
-        System.out.println("\n" + repeat("=", 80));
+        System.out.println("\n" + SEPARATOR_EQUALS);
         System.out.println("                          TRADE ESEGUITI");
-        System.out.println(repeat("=", 80));
-        System.out.printf("%-10s %-12s %-15s %-20s %-20s%n", "Order ID", "Tipo", "Quantità", "Prezzo", "Controparte");
-        System.out.println(repeat("-", 80));
+        System.out.println(SEPARATOR_EQUALS);
+        System.out.printf("%-10s %-12s %-15s %-20s %-20s%n",
+                "Order ID", "Tipo", "Quantità", "Prezzo", "Controparte");
+        System.out.println(SEPARATOR_DASHES);
 
         for (int i = 0; i < trades.size(); i++) {
             JsonObject trade = trades.get(i).getAsJsonObject();
             int orderId = trade.get("orderId").getAsInt();
             String type = trade.get("type").getAsString();
-            String tipoStr = type.equals("bid") ? "ACQUISTO" : "VENDITA";
+            String tipoStr = "bid".equals(type) ? "ACQUISTO" : "VENDITA";
             int size = trade.get("size").getAsInt();
             int price = trade.get("price").getAsInt();
-            String counterparty = trade.has("counterparty") ? trade.get("counterparty").getAsString() : "N/A";
-            System.out.printf("%-10d %-12s %-15s %-20s %-20s%n", orderId, tipoStr, formatSize(size) + " BTC", formatPrice(price) + " USD", counterparty);
+            String counterparty = trade.has("counterparty") ?
+                    trade.get("counterparty").getAsString() : "N/A";
+
+            System.out.printf("%-10d %-12s %-15s %-20s %-20s%n",
+                    orderId, tipoStr,
+                    formatSize(size) + " BTC",
+                    formatPrice(price) + " USD",
+                    counterparty);
         }
 
-        System.out.println(repeat("=", 80));
+        System.out.println(SEPARATOR_EQUALS);
         System.out.print(">> ");
         System.out.flush();
     }
@@ -128,13 +141,5 @@ public class UDPNotificationListener implements Runnable {
 
     private String formatSize(int sizeInMillis) {
         return String.format("%.3f", sizeInMillis / 1000.0);
-    }
-
-    private String repeat(String str, int times) {
-        StringBuilder sb = new StringBuilder(str.length() * times);
-        for (int i = 0; i < times; i++) {
-            sb.append(str);
-        }
-        return sb.toString();
     }
 }

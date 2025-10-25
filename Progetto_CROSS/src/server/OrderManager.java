@@ -8,7 +8,10 @@ import java.io.IOException;
 import java.time.LocalDate;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import server.utility.OrderIdGenerator;
@@ -38,7 +41,6 @@ public class OrderManager {
         private final int size;           // Quantità (in millesimi di BTC)
         private final int price;          // Prezzo limite
         private final int stopPrice;      // Prezzo di attivazione (per stop)
-        private final long timestamp;     // Quando è stato creato
         private int remainingSize;        // Quantità ancora da eseguire
 
         public Order(String username, String type, String orderType, int size, int price, int stopPrice) {
@@ -49,17 +51,36 @@ public class OrderManager {
             this.size = size;
             this.price = price;
             this.stopPrice = stopPrice;
-            this.timestamp = System.currentTimeMillis();
             this.remainingSize = size;
         }
 
-        public int getOrderId() { return orderId; }
-        public String getUsername() { return username; }
-        public String getType() { return type; }
-        public String getOrderType() { return orderType; }
-        public int getSize() { return size; }
-        public int getPrice() { return price; }
-        public int getStopPrice() { return stopPrice; }
+        public int getOrderId() {
+            return orderId;
+        }
+
+        public String getUsername() {
+            return username;
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public String getOrderType() {
+            return orderType;
+        }
+
+        public int getSize() {
+            return size;
+        }
+
+        public int getPrice() {
+            return price;
+        }
+
+        public int getStopPrice() {
+            return stopPrice;
+        }
 
         public synchronized int getRemainingSize() {
             return remainingSize;
@@ -86,7 +107,7 @@ public class OrderManager {
 
     public static int insertLimitOrder(String username, String type, int size, int price) {
         try {
-            if (!isValidOrderType(type) || size <= 0 || price <= 0) {
+            if (isInvalidOrderType(type) || size <= 0 || price <= 0) {
                 return -1;
             }
 
@@ -111,7 +132,7 @@ public class OrderManager {
 
     public static int insertMarketOrder(String username, String type, int size) {
         try {
-            if (!isValidOrderType(type) || size <= 0) {
+            if (isInvalidOrderType(type) || size <= 0) {
                 return -1;
             }
 
@@ -136,14 +157,13 @@ public class OrderManager {
 
     public static int insertStopOrder(String username, String type, int size, int stopPrice) {
         try {
-            if (!isValidOrderType(type) || size <= 0 || stopPrice <= 0) {
+            if (isInvalidOrderType(type) || size <= 0 || stopPrice <= 0) {
                 return -1;
             }
 
             // Verifica che lo stop price abbia senso
             if (!StopOrderManager.isValidStopPrice(type, stopPrice, currentMarketPrice)) {
-                System.err.println("[OrderManager] Stop price non valido: " +
-                        PriceCalculator.formatPrice(stopPrice));
+                System.err.println("[OrderManager] Stop price non valido: " + PriceCalculator.formatPrice(stopPrice));
                 return -1;
             }
 
@@ -176,8 +196,16 @@ public class OrderManager {
                 return 101;
             }
 
-            boolean removed = OrderBook.removeOrder(order);
-            StopOrderManager.removeStopOrder(orderId);
+            boolean removed = false;
+
+            // Prova a rimuovere dall'OrderBook
+            if ("limit".equals(order.getOrderType())) {
+                removed = OrderBook.removeOrder(order);
+            }
+            // Prova a rimuovere dagli Stop Orders
+            else if ("stop".equals(order.getOrderType())) {
+                removed = StopOrderManager.removeStopOrder(orderId);
+            }
 
             if (removed) {
                 allOrders.remove(orderId);
@@ -223,7 +251,7 @@ public class OrderManager {
 
             JsonArray allRecords = TradePersistence.loadTrades();
 
-            if (allRecords.size() == 0) {
+            if (allRecords.isEmpty()) {
                 JsonObject response = new JsonObject();
                 response.addProperty("month", monthYear);
                 response.addProperty("totalDays", 0);
@@ -260,12 +288,12 @@ public class OrderManager {
                             trade.addProperty("orderId", record.get("orderId").getAsInt());
                         }
 
-                        tradesByDay.computeIfAbsent(dayKey, k -> new ArrayList<>()).add(trade);
+                        tradesByDay.computeIfAbsent(dayKey, _ -> new ArrayList<>()).add(trade);
                         filtered++;
                     }
 
                 } catch (Exception e) {
-                    continue;
+                    //non fa nulla
                 }
             }
 
@@ -326,8 +354,8 @@ public class OrderManager {
         }
     }
 
-    private static boolean isValidOrderType(String type) {
-        return "bid".equals(type) || "ask".equals(type);
+    private static boolean isInvalidOrderType(String type) {
+        return !"bid".equals(type) && !"ask".equals(type);
     }
 
     public static int getCurrentMarketPrice() {

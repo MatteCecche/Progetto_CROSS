@@ -1,6 +1,8 @@
 package server.orders;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import server.OrderManager.Order;
@@ -38,8 +40,7 @@ public class StopOrderManager {
         return PriceCalculator.isValidStopPrice(orderType, stopPrice, currentMarketPrice);
     }
 
-    public static List<Order> checkAndActivateStopOrders(int newMarketPrice, MatchingEngine.TradeExecutor tradeExecutor) {
-        List<Order> activatedOrders = new ArrayList<>();
+    public static void checkAndActivateStopOrders(int newMarketPrice, MatchingEngine.TradeExecutor tradeExecutor) {
         List<Order> toActivate = new ArrayList<>();
 
         for (Order stopOrder : stopOrders.values()) {
@@ -50,14 +51,11 @@ public class StopOrderManager {
 
         for (Order stopOrder : toActivate) {
             activateStopOrder(stopOrder, tradeExecutor);
-            activatedOrders.add(stopOrder);
         }
 
-        if (!activatedOrders.isEmpty()) {
-            System.out.println("[StopOrderManager] Attivati " + activatedOrders.size() + " Stop Orders");
+        if (!toActivate.isEmpty()) {
+            System.out.println("[StopOrderManager] Attivati " + toActivate.size() + " Stop Orders");
         }
-
-        return activatedOrders;
     }
 
     private static boolean shouldActivateStopOrder(Order stopOrder, int currentPrice) {

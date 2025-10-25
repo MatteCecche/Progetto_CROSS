@@ -1,6 +1,11 @@
 package server.orderbook;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 
 import server.OrderManager.Order;
 
@@ -16,9 +21,9 @@ public class MatchingEngine {
         void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice);
     }
 
-    public static int performLimitOrderMatching(TradeExecutor tradeExecutor) {
+    public static void performLimitOrderMatching(TradeExecutor tradeExecutor) {
         synchronized (MATCHING_LOCK) {
-            int tradesExecuted = 0;
+            int tradesExecuted = 0;  // Tieni per i log
 
             while (true) {
                 Integer bestBidPrice = OrderBook.getBestBidPrice();
@@ -70,8 +75,6 @@ public class MatchingEngine {
             if (tradesExecuted > 0) {
                 System.out.println("[MatchingEngine] Eseguiti " + tradesExecuted + " trade");
             }
-
-            return tradesExecuted;
         }
     }
 
@@ -139,12 +142,12 @@ public class MatchingEngine {
     }
 
     private static List<Integer> getSortedPricesForMarketOrder(String oppositeType, Map<Integer, LinkedList<Order>> oppositeBook) {
-        List<Integer> prices = new ArrayList<Integer>(oppositeBook.keySet());
+        List<Integer> prices = new ArrayList<>(oppositeBook.keySet());
 
         if ("ask".equals(oppositeType)) {
-            Collections.sort(prices);
+            prices.sort(null);
         } else {
-            Collections.sort(prices, Collections.reverseOrder());
+            prices.sort(Collections.reverseOrder());
         }
 
         return prices;

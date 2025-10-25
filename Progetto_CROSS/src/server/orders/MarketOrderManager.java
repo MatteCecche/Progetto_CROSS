@@ -12,17 +12,17 @@ public class MarketOrderManager {
     public static boolean insertMarketOrder(Order order, MatchingEngine.TradeExecutor tradeExecutor) {
         try {
             if (!"market".equals(order.getOrderType())) {
-                System.err.println("[MarketOrderManager] Ordine non è di tipo 'market'");
+                System.err.println("[MarketOrderManager] Errore: Ordine non è di tipo 'market'");
                 return false;
             }
 
             if (!isValidMarketOrder(order)) {
-                System.err.println("[MarketOrderManager] Parametri non validi");
+                System.err.println("[MarketOrderManager] Errore: Parametri non validi");
                 return false;
             }
 
             if (!hasLiquidity(order)) {
-                System.err.println("[MarketOrderManager] Liquidità insufficiente");
+                System.err.println("[MarketOrderManager] Errore: Liquidità insufficiente");
                 return false;
             }
 

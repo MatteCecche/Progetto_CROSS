@@ -1,6 +1,8 @@
 package server.orderbook;
 
-import java.util.*;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import server.OrderManager.Order;
@@ -17,12 +19,12 @@ public class OrderBook {
     private static final Map<Integer, LinkedList<Order>> askOrders = new ConcurrentHashMap<>();
 
     public static void addToBidBook(Order order) {
-        bidOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
+        bidOrders.computeIfAbsent(order.getPrice(), _ -> new LinkedList<>()).addLast(order);
         System.out.println("[OrderBook] Aggiunto BID: " + order.getOrderId());
     }
 
     public static void addToAskBook(Order order) {
-        askOrders.computeIfAbsent(order.getPrice(), k -> new LinkedList<>()).addLast(order);
+        askOrders.computeIfAbsent(order.getPrice(), _ -> new LinkedList<>()).addLast(order);
         System.out.println("[OrderBook] Aggiunto ASK: " + order.getOrderId());
     }
 
@@ -47,36 +49,23 @@ public class OrderBook {
         return false;
     }
 
-    public static Order removeFirstOrderAtPrice(int price, boolean isBid) {
-        Map<Integer, LinkedList<Order>> book = isBid ? bidOrders : askOrders;
-        LinkedList<Order> ordersAtPrice = book.get(price);
-
-        if (ordersAtPrice != null && !ordersAtPrice.isEmpty()) {
-            Order removedOrder = ordersAtPrice.removeFirst();
-
-            if (ordersAtPrice.isEmpty()) {
-                book.remove(price);
-            }
-
-            return removedOrder;
-        }
-
-        return null;
-    }
-
     public static Integer getBestBidPrice() {
+
         return bidOrders.keySet().stream().max(Integer::compareTo).orElse(null);
     }
 
     public static Integer getBestAskPrice() {
+
         return askOrders.keySet().stream().min(Integer::compareTo).orElse(null);
     }
 
     public static LinkedList<Order> getBidOrdersAtPrice(int price) {
+
         return bidOrders.get(price);
     }
 
     public static LinkedList<Order> getAskOrdersAtPrice(int price) {
+
         return askOrders.get(price);
     }
 
@@ -89,10 +78,12 @@ public class OrderBook {
     }
 
     public static Map<Integer, LinkedList<Order>> getBidOrdersMap() {
+
         return bidOrders;
     }
 
     public static Map<Integer, LinkedList<Order>> getAskOrdersMap() {
+
         return askOrders;
     }
 }

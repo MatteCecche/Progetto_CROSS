@@ -59,11 +59,11 @@ public class TradePersistence {
                     return new JsonArray();
                 }
 
+            } catch (IOException e) {
+                throw new IOException("[TradePersistence] Errore lettura file: " + e.getMessage(), e);
             } catch (Exception e) {
-                System.err.println("[TradePersistence] Errore lettura: " + e.getMessage());
-                return new JsonArray();
+                throw new IOException("[TradePersistence] File JSON malformato: " + e.getMessage(), e);
             }
-
         } finally {
             ordersLock.readLock().unlock();
         }
@@ -84,22 +84,12 @@ public class TradePersistence {
         }
     }
 
-    private static void addTrade(JsonObject tradeData) throws IOException {
-        try {
-            JsonArray allTrades = loadTrades();
-            allTrades.add(tradeData);
-            saveTrades(allTrades);
-
-        } catch (Exception e) {
-            throw new IOException("[TradePersistence] Impossibile aggiungere trade", e);
-        }
-    }
-
     // Salva un trade eseguito: genera DUE record (uno per bid, uno per ask)
     public static void saveExecutedTrade(Order bidOrder, Order askOrder, int size, int price) throws IOException {
         try {
             long timestamp = System.currentTimeMillis() / 1000;
 
+            // Crea i due trade
             JsonObject bidTrade = new JsonObject();
             bidTrade.addProperty("orderId", bidOrder.getOrderId());
             bidTrade.addProperty("type", "bid");
@@ -116,19 +106,15 @@ public class TradePersistence {
             askTrade.addProperty("price", price);
             askTrade.addProperty("timestamp", timestamp);
 
-            addTrade(bidTrade);
-            addTrade(askTrade);
+            JsonArray allTrades = loadTrades();
+
+            allTrades.add(bidTrade);
+            allTrades.add(askTrade);
+
+            saveTrades(allTrades);
 
         } catch (Exception e) {
             throw new IOException("[TradePersistence] Impossibile salvare trade", e);
         }
-    }
-
-    private static String formatPrice(int priceInMillis) {
-        return String.format("%,.0f", priceInMillis / 1000.0);
-    }
-
-    private static String formatSize(int sizeInMillis) {
-        return String.format("%.3f", sizeInMillis / 1000.0);
     }
 }

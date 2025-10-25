@@ -12,12 +12,12 @@ public class LimitOrderManager {
     public static boolean insertLimitOrder(Order order, MatchingEngine.TradeExecutor tradeExecutor) {
         try {
             if (!"limit".equals(order.getOrderType())) {
-                System.err.println("[LimitOrderManager] Ordine non è di tipo 'limit'");
+                System.err.println("[LimitOrderManager] Errore: Ordine non è di tipo 'limit'");
                 return false;
             }
 
             if (!isValidLimitOrder(order)) {
-                System.err.println("[LimitOrderManager] Parametri non validi");
+                System.err.println("[LimitOrderManager] Errore: Parametri non validi");
                 return false;
             }
 
@@ -40,19 +40,7 @@ public class LimitOrderManager {
     }
 
     private static boolean isValidLimitOrder(Order order) {
-        if (!isValidOrderType(order.getType())) {
-            return false;
-        }
-
-        if (order.getSize() <= 0) {
-            return false;
-        }
-
-        if (order.getPrice() <= 0) {
-            return false;
-        }
-
-        return true;
+        return isValidOrderType(order.getType()) && order.getSize() > 0 && order.getPrice() > 0;
     }
 
     private static boolean isValidOrderType(String type) {

@@ -11,11 +11,15 @@ import java.net.MulticastSocket;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 
 /*
  * Listener per notifiche multicast di soglie prezzo
  */
 public class MulticastListener implements Runnable {
+
+    // stringa per separare i messaggi
+    private static final String SEPARATOR = "============================================================";
 
     // Socket multicast per ricezione messaggi
     private MulticastSocket multicastSocket;
@@ -51,7 +55,7 @@ public class MulticastListener implements Runnable {
             multicastSocket.joinGroup(group, netInterface);
             running = true;
 
-            System.out.println("In ascolto su " + multicastAddress + ":" + multicastPort);
+            System.out.println("[" + username + "] In ascolto su " + multicastAddress + ":" + multicastPort);
 
         } catch (IOException e) {
             System.err.println("Errore avvio: " + e.getMessage());
@@ -66,6 +70,7 @@ public class MulticastListener implements Runnable {
                 return loopback;
             }
         } catch (Exception e) {
+            // non fa nulla
         }
 
         try {
@@ -84,11 +89,11 @@ public class MulticastListener implements Runnable {
                 multicastSocket.setSoTimeout(5000);
                 multicastSocket.receive(packet);
 
-                String message = new String(packet.getData(), 0, packet.getLength(), "UTF-8");
+                String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
                 processNotification(message);
 
             } catch (SocketTimeoutException e) {
-                continue;
+                //non fa nulla
             } catch (IOException e) {
                 if (running) {
                     System.err.println("Errore ricezione: " + e.getMessage());
@@ -122,13 +127,13 @@ public class MulticastListener implements Runnable {
             int currentPrice = notification.get("currentPrice").getAsInt();
             String message = notification.get("message").getAsString();
 
-            System.out.println("\n" + repeat("=", 60));
+            System.out.println("\n" + SEPARATOR);
             System.out.println("SOGLIA PREZZO RAGGIUNTA");
-            System.out.println(repeat("=", 60));
+            System.out.println(SEPARATOR);
             System.out.println(message);
             System.out.println("Soglia: " + formatPrice(thresholdPrice) + " USD");
             System.out.println("Prezzo attuale: " + formatPrice(currentPrice) + " USD");
-            System.out.println(repeat("=", 60));
+            System.out.println(SEPARATOR);
             System.out.print(">> ");
             System.out.flush();
 
@@ -153,15 +158,6 @@ public class MulticastListener implements Runnable {
     }
 
     private String formatPrice(int priceInMillis) {
-
         return String.format("%,.0f", priceInMillis / 1000.0);
-    }
-
-    private String repeat(String str, int times) {
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < times; i++) {
-            sb.append(str);
-        }
-        return sb.toString();
     }
 }

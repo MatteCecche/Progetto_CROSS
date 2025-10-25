@@ -76,14 +76,14 @@ public class OrderIdGenerator {
                             maxOrderId = orderId;
                         }
                     } catch (NumberFormatException e) {
-                        continue;
+                        //non fa nulla
                     }
                 }
             }
             return maxOrderId;
 
         } catch (Exception e) {
-            throw new IOException("[OrderIdGenerator] Impossibile leggere file storico", e);
+            throw new IOException("[OrderIdGenerator] Errore: Impossibile leggere file", e);
         }
     }
 }

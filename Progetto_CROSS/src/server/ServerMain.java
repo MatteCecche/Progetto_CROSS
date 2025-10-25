@@ -42,7 +42,7 @@ public class ServerMain {
 
 
     public static void main(String[] args) {
-        System.out.println("[Server] ===== Avvio Server CROSS =====");
+        System.out.println("[Server] ===== Avvio Server CROSS ======");
 
         Properties config;
         try {
@@ -238,7 +238,7 @@ public class ServerMain {
             UDPNotificationService.shutdown();
             socketUserMap.clear();
 
-            System.out.println("[Server] ===== Shutdown completato =====");
+            System.out.println("[Server] ==== Chiusura Server CROSS ====");
             System.exit(0);
 
         } catch (Exception e) {

@@ -1058,5 +1058,6 @@ public class ClientMain {
         if (userScanner != null) {
             userScanner.close();
         }
+        System.out.println("=========== Chiusura Client CROSS ============");
     }
 }
