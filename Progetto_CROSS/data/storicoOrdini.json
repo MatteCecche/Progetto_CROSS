@@ -1,0 +1,52 @@
+{
+  "trades": [
+    {
+      "orderId": 1,
+      "type": "bid",
+      "orderType": "limit",
+      "size": 10000,
+      "price": 60000000,
+      "timestamp": 1761641847
+    },
+    {
+      "orderId": 2,
+      "type": "ask",
+      "orderType": "market",
+      "size": 10000,
+      "price": 60000000,
+      "timestamp": 1761641847
+    },
+    {
+      "orderId": 3,
+      "type": "bid",
+      "orderType": "limit",
+      "size": 10000,
+      "price": 60000000,
+      "timestamp": 1761643079
+    },
+    {
+      "orderId": 4,
+      "type": "ask",
+      "orderType": "market",
+      "size": 10000,
+      "price": 60000000,
+      "timestamp": 1761643079
+    },
+    {
+      "orderId": 5,
+      "type": "bid",
+      "orderType": "limit",
+      "size": 10000,
+      "price": 62000000,
+      "timestamp": 1761643246
+    },
+    {
+      "orderId": 6,
+      "type": "ask",
+      "orderType": "market",
+      "size": 10000,
+      "price": 62000000,
+      "timestamp": 1761643246
+    }
+  ]
+}
