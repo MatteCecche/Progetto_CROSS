@@ -34,6 +34,9 @@ public class MulticastListener implements Runnable {
     // Flag per controllo esecuzione thread
     private volatile boolean running;
 
+    // Lock per la stampa su terminale
+    private final Object consoleLock;
+
     // Colori per risposte
     public static final String ANSI_RESET = "\u001B[0m";
     public static final String ANSI_RED = "\u001B[31m";
@@ -41,11 +44,12 @@ public class MulticastListener implements Runnable {
     public static final String ANSI_YELLOW = "\u001B[33m";
     public static final String ANSI_BOLD = "\u001B[1m";
 
-    public MulticastListener(String multicastAddress, int multicastPort, String username) {
+    public MulticastListener(String multicastAddress, int multicastPort, String username, Object consoleLock) {
         this.multicastAddress = multicastAddress;
         this.multicastPort = multicastPort;
         this.username = username;
         this.running = false;
+        this.consoleLock = consoleLock;
     }
 
     public void start() throws IOException {
@@ -113,23 +117,25 @@ public class MulticastListener implements Runnable {
     }
 
     private void displayPriceNotification(JsonObject notification) {
-        try {
-            int thresholdPrice = notification.get("thresholdPrice").getAsInt();
-            int currentPrice = notification.get("currentPrice").getAsInt();
-            String message = notification.get("message").getAsString();
+        synchronized (consoleLock) {
+            try {
+                int thresholdPrice = notification.get("thresholdPrice").getAsInt();
+                int currentPrice = notification.get("currentPrice").getAsInt();
+                String message = notification.get("message").getAsString();
 
-            System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
-            System.out.println(ANSI_RED + "                             SOGLIA PREZZO RAGGIUNTA" + ANSI_RESET);
-            System.out.println(ANSI_YELLOW +SEPARATOR + ANSI_RESET);
-            System.out.println(ANSI_GREEN + "  " + message + ANSI_RESET);
-            System.out.println(ANSI_GREEN + "  Soglia impostata : " + formatPrice(thresholdPrice) + " USD" + ANSI_RESET);
-            System.out.println(ANSI_GREEN + "  Prezzo attuale   : " + formatPrice(currentPrice) + " USD" + ANSI_RESET);
-            System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
-            System.out.print(ANSI_BOLD + ">> " + ANSI_RESET);
-            System.out.flush();
+                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
+                System.out.println(ANSI_RED + "                             SOGLIA PREZZO RAGGIUNTA" + ANSI_RESET);
+                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
+                System.out.println(ANSI_GREEN + "  " + message + ANSI_RESET);
+                System.out.println(ANSI_GREEN + "  Soglia impostata : " + formatPrice(thresholdPrice) + " USD" + ANSI_RESET);
+                System.out.println(ANSI_GREEN + "  Prezzo attuale   : " + formatPrice(currentPrice) + " USD" + ANSI_RESET);
+                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
+                System.out.print(ANSI_BOLD + ">> " + ANSI_RESET);
+                System.out.flush();
 
-        } catch (Exception e) {
-            System.err.println(ANSI_RED + "Errore display: " + e.getMessage() + ANSI_RESET);
+            } catch (Exception e) {
+                System.err.println(ANSI_RED + "Errore display: " + e.getMessage() + ANSI_RESET);
+            }
         }
     }
 

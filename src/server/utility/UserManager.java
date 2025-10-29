@@ -27,16 +27,20 @@ public class UserManager {
     // Configurazione Gson
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
+    public static final String ANSI_RED = "\u001B[31m";
+    public static final String ANSI_GREEN = "\u001B[32m";
+    public static final String ANSI_RESET = "\u001B[0m";
+
     // Controlla che tutto sia a posto prima di partire
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException("[UserManager] Cartella 'data' non trovata\n");
+            throw new IOException(ANSI_RED + "[UserManager] Cartella 'data' non trovata\n" + ANSI_RESET);
         }
 
         File usersFile = new File(USERS_FILE);
         if (!usersFile.exists()) {
-            throw new IOException("[UserManager] File 'users.json' non trovato\n");
+            throw new IOException(ANSI_RED + "[UserManager] File 'users.json' non trovato\n" + ANSI_RESET);
         }
 
         // Se il file è vuoto lo inizializzo
@@ -103,7 +107,7 @@ public class UserManager {
             return password.equals(storedPassword);
 
         } catch (Exception e) {
-            System.err.println("[UserManager] Errore validazione: " + e.getMessage());
+            System.err.println(ANSI_RED + "[UserManager] Errore validazione: " + e.getMessage() + ANSI_RESET);
             return false;
         }
     }
@@ -138,11 +142,11 @@ public class UserManager {
                 user.addProperty("password", newPassword);
                 saveUsers(users);
 
-                System.out.println("[UserManager] Password aggiornata per: " + username);
+                System.out.println(ANSI_GREEN + "[UserManager] Password aggiornata per: " + username + ANSI_RESET);
                 return 100;
 
             } catch (Exception e) {
-                System.err.println("[UserManager] Errore aggiornamento password: " + e.getMessage());
+                System.err.println(ANSI_RED + "[UserManager] Errore aggiornamento password: " + e.getMessage() + ANSI_RESET);
                 return 105;
             }
         }
@@ -217,13 +221,14 @@ public class UserManager {
                     return new JsonArray();
                 }
             } catch (Exception e) {
-                System.err.println("[UserManager] Errore lettura file: " + e.getMessage());
+                System.err.println(ANSI_RED + "[UserManager] Errore lettura file: " + e.getMessage() + ANSI_RESET);
                 initializeUsersFile();
                 return new JsonArray();
             }
         }
     }
     public static Object getFileLock() {
+
         return FILE_LOCK;
     }
 }

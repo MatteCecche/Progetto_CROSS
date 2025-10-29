@@ -32,6 +32,9 @@ public class UDPNotificationListener implements Runnable {
     // Username dell'utente per logging
     private final String username;
 
+    // Lock per la scrittura su terminale
+    private final Object consoleLock;
+
     // Colori per risposte
     public static final String ANSI_RESET = "\u001B[0m";
     public static final String ANSI_RED = "\u001B[31m";
@@ -39,11 +42,12 @@ public class UDPNotificationListener implements Runnable {
     public static final String ANSI_YELLOW = "\u001B[33m";
     public static final String ANSI_BOLD = "\u001B[1m";
 
-    public UDPNotificationListener(int udpPort, String username) {
+    public UDPNotificationListener(int udpPort, String username, Object consoleLock) {
         this.requestedPort = udpPort;
         this.username = username;
         this.running = false;
         this.actualPort = -1;
+        this.consoleLock = consoleLock;
     }
 
     public void start() throws Exception {
@@ -101,27 +105,30 @@ public class UDPNotificationListener implements Runnable {
     }
 
     private void displayTrades(JsonArray trades) {
-        System.out.println(ANSI_YELLOW + SEPARATOR_EQUALS + ANSI_RESET);
-        System.out.println(ANSI_RED + "                                TRADE ESEGUITI" + ANSI_RESET);
-        System.out.println(ANSI_YELLOW +SEPARATOR_EQUALS + ANSI_RESET);
-        System.out.printf(ANSI_RED +"%-10s %-12s %-15s %-20s %-20s%n", "Order ID", "Tipo", "Quantità", "Prezzo", "Controparte" + ANSI_RESET);
-        System.out.println(ANSI_YELLOW +SEPARATOR_DASHES + ANSI_RESET);
+        synchronized (consoleLock) {
+            System.out.print("\r");
+            System.out.println(ANSI_YELLOW + SEPARATOR_EQUALS + ANSI_RESET);
+            System.out.println(ANSI_RED + "                                TRADE ESEGUITI" + ANSI_RESET);
+            System.out.println(ANSI_YELLOW + SEPARATOR_EQUALS + ANSI_RESET);
+            System.out.printf(ANSI_RED + "%-10s %-12s %-15s %-20s %-20s%n", "Order ID", "Tipo", "Quantità", "Prezzo", "Controparte" + ANSI_RESET);
+            System.out.println(ANSI_YELLOW + SEPARATOR_DASHES + ANSI_RESET);
 
-        for (int i = 0; i < trades.size(); i++) {
-            JsonObject trade = trades.get(i).getAsJsonObject();
-            int orderId = trade.get("orderId").getAsInt();
-            String type = trade.get("type").getAsString();
-            String tipoStr = "bid".equals(type) ? "ACQUISTO" : "VENDITA";
-            int size = trade.get("size").getAsInt();
-            int price = trade.get("price").getAsInt();
-            String counterparty = trade.has("counterparty") ? trade.get("counterparty").getAsString() : "N/A";
+            for (int i = 0; i < trades.size(); i++) {
+                JsonObject trade = trades.get(i).getAsJsonObject();
+                int orderId = trade.get("orderId").getAsInt();
+                String type = trade.get("type").getAsString();
+                String tipoStr = "bid".equals(type) ? "ACQUISTO" : "VENDITA";
+                int size = trade.get("size").getAsInt();
+                int price = trade.get("price").getAsInt();
+                String counterparty = trade.has("counterparty") ? trade.get("counterparty").getAsString() : "N/A";
 
-            System.out.printf(ANSI_GREEN + "%-10d %-12s %-15s %-20s %-20s%n", orderId, tipoStr, formatSize(size) + " BTC", formatPrice(price) + " USD", counterparty + ANSI_RESET);
+                System.out.printf(ANSI_GREEN + "%-10d %-12s %-15s %-20s %-20s%n", orderId, tipoStr, formatSize(size) + " BTC", formatPrice(price) + " USD", counterparty + ANSI_RESET);
+            }
+
+            System.out.println(ANSI_YELLOW + SEPARATOR_EQUALS + ANSI_RESET);
+            System.out.print(ANSI_BOLD + ">> " + ANSI_RESET);
+            System.out.flush();
         }
-
-        System.out.println(ANSI_YELLOW +SEPARATOR_EQUALS + ANSI_RESET);
-        System.out.print(ANSI_BOLD + ">> " + ANSI_RESET);
-        System.out.flush();
     }
 
     public void stop() {

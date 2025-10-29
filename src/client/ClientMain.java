@@ -68,6 +68,9 @@ public class ClientMain {
     // Porta del gruppo multicast per notifiche soglia prezzo
     private static int multicastPort;
 
+    // Lock per scrittura sincronizzata nel terminale
+    private static final Object consoleLock = new Object();
+
     // Colori per risposte
     public static final String ANSI_RESET = "\u001B[0m";
     public static final String ANSI_RED = "\u001B[31m";
@@ -158,7 +161,10 @@ public class ClientMain {
         System.out.println(ANSI_CYAN + "====================== Digitare 'help' per lista comandi  ======================" + ANSI_RESET);
 
         while (running) {
-            System.out.print(ANSI_BOLD + "\r>> " + ANSI_RESET);
+            synchronized (consoleLock) {
+                System.out.print(ANSI_BOLD + "\r>> " + ANSI_RESET);
+            }
+
             String inputLine = userScanner.nextLine().trim();
 
             if (inputLine.isEmpty()) {
@@ -169,46 +175,48 @@ public class ClientMain {
             String command = parts[0].toLowerCase();
 
             try {
-                switch (command) {
-                    case "help":
-                        printHelp();
-                        break;
-                    case "register":
-                        handleRegistration(parts, serverHost, rmiPort);
-                        break;
-                    case "login":
-                        handleLogin(parts, serverHost, tcpPort, socketTimeout);
-                        break;
-                    case "logout":
-                        handleLogout();
-                        break;
-                    case "updatecredentials":
-                        handleUpdateCredentials(parts, serverHost, tcpPort);
-                        break;
-                    case "insertlimitorder":
-                        handleInsertLimitOrder(parts);
-                        break;
-                    case "insertmarketorder":
-                        handleInsertMarketOrder(parts);
-                        break;
-                    case "insertstoporder":
-                        handleInsertStopOrder(parts);
-                        break;
-                    case "cancelorder":
-                        handleCancelOrder(parts);
-                        break;
-                    case "getpricehistory":
-                        handleGetPriceHistory(parts);
-                        break;
-                    case "registerpricealert":
-                        handleRegisterPriceAlert(parts);
-                        break;
-                    case "esci":
-                        running = false;
-                        break;
-                    default:
-                        System.out.println("Comando non riconosciuto. Digitare 'help'");
-                        break;
+                synchronized (consoleLock) {
+                    switch (command) {
+                        case "help":
+                            printHelp();
+                            break;
+                        case "register":
+                            handleRegistration(parts, serverHost, rmiPort);
+                            break;
+                        case "login":
+                            handleLogin(parts, serverHost, tcpPort, socketTimeout);
+                            break;
+                        case "logout":
+                            handleLogout();
+                            break;
+                        case "updatecredentials":
+                            handleUpdateCredentials(parts, serverHost, tcpPort);
+                            break;
+                        case "insertlimitorder":
+                            handleInsertLimitOrder(parts);
+                            break;
+                        case "insertmarketorder":
+                            handleInsertMarketOrder(parts);
+                            break;
+                        case "insertstoporder":
+                            handleInsertStopOrder(parts);
+                            break;
+                        case "cancelorder":
+                            handleCancelOrder(parts);
+                            break;
+                        case "getpricehistory":
+                            handleGetPriceHistory(parts);
+                            break;
+                        case "registerpricealert":
+                            handleRegisterPriceAlert(parts);
+                            break;
+                        case "esci":
+                            running = false;
+                            break;
+                        default:
+                            System.out.println("Comando non riconosciuto. Digitare 'help'");
+                            break;
+                    }
                 }
             } catch (Exception e) {
                 System.err.println(ANSI_RED + "Errore: " + e.getMessage() + ANSI_RESET);
@@ -316,7 +324,7 @@ public class ClientMain {
                 startMulticastListener();
             } else {
                 String errorMsg = response.has("errorMessage") ? response.get("errorMessage").getAsString() : "Errore login";
-                System.out.println(errorMsg);
+                System.out.println(ANSI_RED + errorMsg + ANSI_RESET);
                 closeConnection();
             }
 
@@ -788,7 +796,7 @@ public class ClientMain {
     private static void startUDPListener(String username) {
         try {
             if (udpListener == null) {
-                udpListener = new UDPNotificationListener(udpNotificationPort, username);
+                udpListener = new UDPNotificationListener(udpNotificationPort, username, consoleLock);
                 udpListener.start();
 
                 udpListenerThread = new Thread(udpListener, "UDP-Listener");
@@ -823,7 +831,7 @@ public class ClientMain {
     private static void startMulticastListener() {
         try {
             if (multicastListener == null && currentLoggedUsername != null) {
-                multicastListener = new MulticastListener(multicastAddress, multicastPort, currentLoggedUsername);
+                multicastListener = new MulticastListener(multicastAddress, multicastPort, currentLoggedUsername, consoleLock);
                 multicastListener.start();
 
                 multicastThread = new Thread(multicastListener, "Multicast-Listener");

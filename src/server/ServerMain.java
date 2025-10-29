@@ -47,7 +47,8 @@ public class ServerMain {
 
 
     public static void main(String[] args) {
-        System.out.println(ANSI_CYAN + "=============== Avvio Server CROSS ================" + ANSI_RESET);
+        System.out.println();
+        System.out.println(ANSI_CYAN + "==================== Avvio Server CROSS =====================" + ANSI_RESET);
 
         Properties config;
         try {
@@ -166,14 +167,13 @@ public class ServerMain {
 
     private static void listenForTerminalCommands() {
         Scanner scanner = new Scanner(System.in);
-        System.out.println(ANSI_CYAN + "========== Digitare 'esci' per terminare ==========" + ANSI_RESET);
+        System.out.println(ANSI_CYAN + "=============== Digitare 'esci' per terminare ===============" + ANSI_RESET);
 
         while (running) {
             try {
                 String command = scanner.nextLine().trim().toLowerCase();
 
                 if ("esci".equals(command)) {
-                    System.out.println(ANSI_GREEN + "[Server] Terminazione in corso..." + ANSI_RESET);
                     running = false;
 
                     if (serverSocket != null && !serverSocket.isClosed()) {
@@ -235,7 +235,8 @@ public class ServerMain {
             UDPNotificationService.shutdown();
             socketUserMap.clear();
 
-            System.out.println(ANSI_CYAN + "============== Chiusura Server CROSS ==============" + ANSI_RESET);
+            System.out.println(ANSI_CYAN + "=================== Chiusura Server CROSS ===================" + ANSI_RESET);
+            System.out.println();
             System.exit(0);
 
         } catch (Exception e) {

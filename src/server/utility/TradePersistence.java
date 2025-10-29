@@ -28,10 +28,14 @@ public class TradePersistence {
     // Configurazione JSON
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
+    public static final String ANSI_RED = "\u001B[31m";
+    public static final String ANSI_GREEN = "\u001B[32m";
+    public static final String ANSI_RESET = "\u001B[0m";
+
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException("[TradePersistence] Cartella 'data' non trovata\n");
+            throw new IOException(ANSI_RED + "[TradePersistence] Cartella 'data' non trovata\n" + ANSI_RESET);
         }
 
         File storicoFile = new File(STORICO_FILE);
@@ -60,9 +64,9 @@ public class TradePersistence {
                 }
 
             } catch (IOException e) {
-                throw new IOException("[TradePersistence] Errore lettura file: " + e.getMessage(), e);
+                throw new IOException(ANSI_RED + "[TradePersistence] Errore lettura file: " + e.getMessage() + ANSI_RESET, e);
             } catch (Exception e) {
-                throw new IOException("[TradePersistence] File JSON malformato: " + e.getMessage(), e);
+                throw new IOException(ANSI_RED + "[TradePersistence] File JSON malformato: " + e.getMessage() + ANSI_RESET, e);
             }
         } finally {
             ordersLock.readLock().unlock();
@@ -114,7 +118,7 @@ public class TradePersistence {
             saveTrades(allTrades);
 
         } catch (Exception e) {
-            throw new IOException("[TradePersistence] Impossibile salvare trade", e);
+            throw new IOException(ANSI_RED + "[TradePersistence] Impossibile salvare trade" + ANSI_RESET, e);
         }
     }
 }

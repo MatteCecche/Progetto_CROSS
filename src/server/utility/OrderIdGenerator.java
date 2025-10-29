@@ -23,6 +23,10 @@ public class OrderIdGenerator {
     // File storico da cui leggere l'ultimo ID utilizzato
     private static final String STORICO_FILE = "data/StoricoOrdini.json";
 
+    public static final String ANSI_RED = "\u001B[31m";
+    public static final String ANSI_GREEN = "\u001B[32m";
+    public static final String ANSI_RESET = "\u001B[0m";
+
 
     public static synchronized void initialize() throws IOException {
         if (initialized) {
@@ -44,13 +48,13 @@ public class OrderIdGenerator {
         } catch (Exception e) {
             orderIdCounter.set(10000);
             initialized = true;
-            throw new IOException("[OrderIdGenerator] Errore inizializzazione OrderIdGenerator", e);
+            throw new IOException(ANSI_RED + "[OrderIdGenerator] Errore inizializzazione OrderIdGenerator" + ANSI_RESET, e);
         }
     }
 
     public static int getNextOrderId() {
         if (!initialized) {
-            throw new IllegalStateException("OrderIdGenerator non inizializzato");
+            throw new IllegalStateException(ANSI_RED + "OrderIdGenerator non inizializzato" + ANSI_RESET);
         }
         return orderIdCounter.getAndIncrement();
     }
@@ -83,7 +87,7 @@ public class OrderIdGenerator {
             return maxOrderId;
 
         } catch (Exception e) {
-            throw new IOException("[OrderIdGenerator] Errore: Impossibile leggere file", e);
+            throw new IOException(ANSI_RED + "[OrderIdGenerator] Errore: Impossibile leggere file" + ANSI_RESET, e);
         }
     }
 }
