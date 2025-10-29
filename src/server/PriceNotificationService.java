@@ -8,31 +8,16 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
+import server.utility.Colors;
 
-/*
- * Gestisce notifiche multicast quando il prezzo supera le soglie utente
- */
 public class PriceNotificationService {
 
-    // Configurazione multicast
     private static String MULTICAST_ADDRESS;
     private static int MULTICAST_PORT;
-
-    // Socket per invio messaggi multicast dal server
     private static DatagramSocket multicastSender;
-
-    // Indirizzo del gruppo multicast
     private static InetAddress multicastGroup;
-
-    // Mappa username -> soglia prezzo interessata
     private static final ConcurrentHashMap<String, Integer> userThresholds = new ConcurrentHashMap<>();
-
-    // Gson per messaggi JSON
     private static final Gson gson = new Gson();
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public static void initialize(String multicastAddress, int multicastPort) throws IOException {
         try {
@@ -42,7 +27,7 @@ public class PriceNotificationService {
             multicastGroup = InetAddress.getByName(MULTICAST_ADDRESS);
 
         } catch (Exception e) {
-            throw new IOException(ANSI_RED + "[PriceNotification] Impossibile inizializzare servizio multicast"  + ANSI_RESET, e);
+            throw new IOException(Colors.RED + "[PriceNotification] Impossibile inizializzare servizio multicast"  + Colors.RESET, e);
         }
     }
 
@@ -52,12 +37,12 @@ public class PriceNotificationService {
         }
 
         userThresholds.put(username, thresholdPrice);
-        System.out.println(ANSI_GREEN + "[PriceNotification] " + username + " registrato per soglia: " + formatPrice(thresholdPrice) + ANSI_RESET);
+        System.out.println(Colors.GREEN + "[PriceNotification] " + username + " registrato per soglia: " + formatPrice(thresholdPrice) + Colors.RESET);
     }
 
     public static void unregisterUser(String username) {
         if (userThresholds.remove(username) != null) {
-            System.out.println(ANSI_GREEN + "[PriceNotification] Utente rimosso: " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[PriceNotification] Utente rimosso: " + username + Colors.RESET);
         }
     }
 
@@ -78,7 +63,7 @@ public class PriceNotificationService {
             }
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[PriceNotification] Errore controllo soglie: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[PriceNotification] Errore controllo soglie: " + e.getMessage() + Colors.RESET);
         }
     }
 
@@ -99,10 +84,10 @@ public class PriceNotificationService {
 
             multicastSender.send(packet);
 
-            System.out.println(ANSI_GREEN + "[PriceNotification] Notifica inviata a " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[PriceNotification] Notifica inviata a " + username + Colors.RESET);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[PriceNotification] Errore invio notifica: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[PriceNotification] Errore invio notifica: " + e.getMessage() + Colors.RESET);
         }
     }
 
@@ -118,10 +103,10 @@ public class PriceNotificationService {
         try {
             if (multicastSender != null && !multicastSender.isClosed()) {
                 multicastSender.close();
-                System.out.println(ANSI_GREEN + "[PriceNotification] Servizio chiuso" + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[PriceNotification] Servizio chiuso" + Colors.RESET);
             }
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[PriceNotification] Errore shutdown: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[PriceNotification] Errore shutdown: " + e.getMessage() + Colors.RESET);
         }
 
         userThresholds.clear();

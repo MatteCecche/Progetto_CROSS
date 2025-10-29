@@ -6,29 +6,21 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import server.OrderManager.Order;
+import server.utility.Colors;
 
-/*
- * Gestisce le strutture dati dell'Order Book
- */
 public class OrderBook {
 
-    // Ordini BID (acquisto) organizzati per prezzo
     private static final Map<Integer, LinkedList<Order>> bidOrders = new ConcurrentHashMap<>();
-
-    // Ordini ASK (vendita) organizzati per prezzo
     private static final Map<Integer, LinkedList<Order>> askOrders = new ConcurrentHashMap<>();
-
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public static void addToBidBook(Order order) {
         bidOrders.computeIfAbsent(order.getPrice(), _ -> new LinkedList<>()).addLast(order);
-        System.out.println(ANSI_GREEN + "[OrderBook] Aggiunto BID: " + order.getOrderId() + ANSI_RESET);
+        System.out.println(Colors.GREEN + "[OrderBook] Aggiunto BID: " + order.getOrderId() + Colors.RESET);
     }
 
     public static void addToAskBook(Order order) {
         askOrders.computeIfAbsent(order.getPrice(), _ -> new LinkedList<>()).addLast(order);
-        System.out.println(ANSI_GREEN + "[OrderBook] Aggiunto ASK: " + order.getOrderId() + ANSI_RESET);
+        System.out.println(Colors.GREEN + "[OrderBook] Aggiunto ASK: " + order.getOrderId() + Colors.RESET);
     }
 
     public static boolean removeOrder(Order order) {
@@ -43,7 +35,7 @@ public class OrderBook {
             }
 
             if (removed) {
-                System.out.println(ANSI_GREEN + "[OrderBook] Rimosso ordine " + order.getOrderId() + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[OrderBook] Rimosso ordine " + order.getOrderId() + Colors.RESET);
             }
 
             return removed;

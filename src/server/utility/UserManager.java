@@ -13,34 +13,21 @@ import java.io.IOException;
 import java.net.Socket;
 import java.util.concurrent.ConcurrentHashMap;
 
-/*
- * Gestisce gli utenti del sistema salvandoli in un file JSON
- */
 public class UserManager {
 
-    // File per memorizzare gli utenti registrati
     private static final String USERS_FILE = "data/users.json";
-
-    // Oggetto lock per sincronizzazione
     private static final Object FILE_LOCK = new Object();
-
-    // Configurazione Gson
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
-
-    // Controlla che tutto sia a posto prima di partire
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException(ANSI_RED + "[UserManager] Cartella 'data' non trovata\n" + ANSI_RESET);
+            throw new IOException(Colors.RED + "[UserManager] Cartella 'data' non trovata\n" + Colors.RESET);
         }
 
         File usersFile = new File(USERS_FILE);
         if (!usersFile.exists()) {
-            throw new IOException(ANSI_RED + "[UserManager] File 'users.json' non trovato\n" + ANSI_RESET);
+            throw new IOException(Colors.RED + "[UserManager] File 'users.json' non trovato\n" + Colors.RESET);
         }
 
         // Se il file è vuoto lo inizializzo
@@ -107,7 +94,7 @@ public class UserManager {
             return password.equals(storedPassword);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[UserManager] Errore validazione: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[UserManager] Errore validazione: " + e.getMessage() + Colors.RESET);
             return false;
         }
     }
@@ -142,11 +129,11 @@ public class UserManager {
                 user.addProperty("password", newPassword);
                 saveUsers(users);
 
-                System.out.println(ANSI_GREEN + "[UserManager] Password aggiornata per: " + username + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[UserManager] Password aggiornata per: " + username + Colors.RESET);
                 return 100;
 
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[UserManager] Errore aggiornamento password: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[UserManager] Errore aggiornamento password: " + e.getMessage() + Colors.RESET);
                 return 105;
             }
         }
@@ -221,7 +208,7 @@ public class UserManager {
                     return new JsonArray();
                 }
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[UserManager] Errore lettura file: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[UserManager] Errore lettura file: " + e.getMessage() + Colors.RESET);
                 initializeUsersFile();
                 return new JsonArray();
             }

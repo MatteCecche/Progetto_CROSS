@@ -9,28 +9,22 @@ import java.rmi.server.UnicastRemoteObject;
 
 import common.RegistrazioneRMI;
 import server.utility.UserManager;
+import server.utility.Colors;
 
-/*
- * Servizio RMI per la registrazione degli utenti
- */
 public class RegistrazioneRMIImpl extends UnicastRemoteObject implements RegistrazioneRMI {
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public RegistrazioneRMIImpl() throws RemoteException {
         super();
         try {
             UserManager.initialize();
         } catch (Exception e) {
-            throw new RemoteException(ANSI_RED + "[RegistrazioneRMI] Errore inizializzazione servizio registrazione" + ANSI_RESET, e);
+            throw new RemoteException(Colors.RED + "[RegistrazioneRMI] Errore inizializzazione servizio registrazione" + Colors.RESET, e);
         }
     }
 
     public int register(String username, String password) throws RemoteException {
         try {
-            System.out.println(ANSI_GREEN + "[RegistrazioneRMI] Richiesta registrazione: " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[RegistrazioneRMI] Richiesta registrazione: " + username + Colors.RESET);
 
             // Validazione con metodo dedicato
             int validationResult = UserManager.validateRegistrationParams(username, password);
@@ -42,7 +36,7 @@ public class RegistrazioneRMIImpl extends UnicastRemoteObject implements Registr
                 JsonArray users = UserManager.loadUsers();
 
                 if (UserManager.findUser(users, username) != null) {
-                    System.out.println(ANSI_RED + "[RegistrazioneRMI] Utente già esistente: " + username + ANSI_RESET);
+                    System.out.println(Colors.RED + "[RegistrazioneRMI] Utente già esistente: " + username + Colors.RESET);
                     return 102;
                 }
 
@@ -50,15 +44,15 @@ public class RegistrazioneRMIImpl extends UnicastRemoteObject implements Registr
                 users.add(newUser);
                 UserManager.saveUsers(users);
 
-                System.out.println(ANSI_GREEN + "[RegistrazioneRMI] Utente registrato: " + username + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[RegistrazioneRMI] Utente registrato: " + username + Colors.RESET);
                 return 100;
             }
 
         } catch (IOException e) {
-            System.err.println(ANSI_RED + "[RegistrazioneRMI] Errore I/O: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[RegistrazioneRMI] Errore I/O: " + e.getMessage() + Colors.RESET);
             return 103;
         } catch (Exception e) {
-            throw new RemoteException(ANSI_RED + "[RegistrazioneRMI] Errore durante registrazione" + ANSI_RESET, e);
+            throw new RemoteException(Colors.RED + "[RegistrazioneRMI] Errore durante registrazione" + Colors.RESET, e);
         }
     }
 }

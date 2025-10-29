@@ -9,23 +9,11 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/*
- * Genera ID univoci per gli ordini
- */
 public class OrderIdGenerator {
 
-    // Generatore orderId
     private static final AtomicInteger orderIdCounter = new AtomicInteger(1);
-
-    // Flag per evitare inizializzazioni multiple
     private static volatile boolean initialized = false;
-
-    // File storico da cui leggere l'ultimo ID utilizzato
     private static final String STORICO_FILE = "data/StoricoOrdini.json";
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
 
     public static synchronized void initialize() throws IOException {
@@ -48,13 +36,13 @@ public class OrderIdGenerator {
         } catch (Exception e) {
             orderIdCounter.set(10000);
             initialized = true;
-            throw new IOException(ANSI_RED + "[OrderIdGenerator] Errore inizializzazione OrderIdGenerator" + ANSI_RESET, e);
+            throw new IOException(Colors.RED + "[OrderIdGenerator] Errore inizializzazione OrderIdGenerator" + Colors.RESET, e);
         }
     }
 
     public static int getNextOrderId() {
         if (!initialized) {
-            throw new IllegalStateException(ANSI_RED + "OrderIdGenerator non inizializzato" + ANSI_RESET);
+            throw new IllegalStateException(Colors.RED + "OrderIdGenerator non inizializzato" + Colors.RESET);
         }
         return orderIdCounter.getAndIncrement();
     }
@@ -80,14 +68,13 @@ public class OrderIdGenerator {
                             maxOrderId = orderId;
                         }
                     } catch (NumberFormatException e) {
-                        //non fa nulla
                     }
                 }
             }
             return maxOrderId;
 
         } catch (Exception e) {
-            throw new IOException(ANSI_RED + "[OrderIdGenerator] Errore: Impossibile leggere file" + ANSI_RESET, e);
+            throw new IOException(Colors.RED + "[OrderIdGenerator] Errore: Impossibile leggere file" + Colors.RESET, e);
         }
     }
 }

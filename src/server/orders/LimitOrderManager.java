@@ -3,29 +3,23 @@ package server.orders;
 import server.OrderManager.Order;
 import server.orderbook.OrderBook;
 import server.orderbook.MatchingEngine;
+import server.utility.Colors;
 
-/*
- * Gestisce gli ordini Limit
- */
 public class LimitOrderManager {
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public static boolean insertLimitOrder(Order order, MatchingEngine.TradeExecutor tradeExecutor) {
         try {
             if (!"limit".equals(order.getOrderType())) {
-                System.err.println(ANSI_RED + "[LimitOrderManager] Errore: Ordine non è di tipo 'limit'" + ANSI_RESET);
+                System.err.println(Colors.RED + "[LimitOrderManager] Errore: Ordine non è di tipo 'limit'" + Colors.RESET);
                 return false;
             }
 
             if (!isValidLimitOrder(order)) {
-                System.err.println(ANSI_RED + "[LimitOrderManager] Errore: Parametri non validi"+ ANSI_RESET);
+                System.err.println(Colors.RED + "[LimitOrderManager] Errore: Parametri non validi"+ Colors.RESET);
                 return false;
             }
 
-            System.out.println(ANSI_GREEN + "[LimitOrderManager] Inserimento Limit Order " + order.getOrderId()+ ANSI_RESET);
+            System.out.println(Colors.GREEN + "[LimitOrderManager] Inserimento Limit Order " + order.getOrderId()+ Colors.RESET);
 
             if ("bid".equals(order.getType())) {
                 OrderBook.addToBidBook(order);
@@ -38,7 +32,7 @@ public class LimitOrderManager {
             return true;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[LimitOrderManager] Errore: " + e.getMessage()+ ANSI_RESET);
+            System.err.println(Colors.RED + "[LimitOrderManager] Errore: " + e.getMessage()+ Colors.RESET);
             return false;
         }
     }

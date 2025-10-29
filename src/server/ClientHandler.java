@@ -16,27 +16,14 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 
 import server.utility.UserManager;
+import server.utility.Colors;
 
-/*
- * Gestisce la comunicazione con un singolo client TCP
- */
 public class ClientHandler implements Runnable {
 
-    // Socket TCP per la comunicazione con il client
     private final Socket clientSocket;
-
-    // Stream di input per ricevere messaggi JSON dal client
     private BufferedReader in;
-
-    // Stream di output per inviare risposte JSON al client
     private PrintWriter out;
-
-    // Mappa condivisa socket -> username
     private final ConcurrentHashMap<Socket, String> socketUserMap;
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public ClientHandler(Socket clientSocket, ConcurrentHashMap<Socket, String> socketUserMap) {
         this.clientSocket = clientSocket;
@@ -51,9 +38,9 @@ public class ClientHandler implements Runnable {
             handleClientMessages();
 
         } catch (SocketTimeoutException e) {
-            System.out.println(ANSI_RED + "[ClientHandler] Timeout: " + clientSocket.getRemoteSocketAddress() + ANSI_RESET);
+            System.out.println(Colors.RED + "[ClientHandler] Timeout: " + clientSocket.getRemoteSocketAddress() + Colors.RESET);
         } catch (IOException e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore comunicazione: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore comunicazione: " + e.getMessage() + Colors.RESET);
         } finally {
             cleanup();
         }
@@ -79,7 +66,7 @@ public class ClientHandler implements Runnable {
             } catch (JsonSyntaxException e) {
                 sendError(103, "JSON non valido");
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[ClientHandler] Errore: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[ClientHandler] Errore: " + e.getMessage() + Colors.RESET);
                 sendError(103, "Errore interno");
             }
         }
@@ -140,15 +127,15 @@ public class ClientHandler implements Runnable {
                     InetAddress clientIP = clientSocket.getInetAddress();
                     UDPNotificationService.registerClient(username, new InetSocketAddress(clientIP, udpPort));
                 } catch (Exception e) {
-                    System.err.println(ANSI_RED + "[ClientHandler] Errore registrazione UDP: " + e.getMessage() + ANSI_RESET);
+                    System.err.println(Colors.RED + "[ClientHandler] Errore registrazione UDP: " + e.getMessage() + Colors.RESET);
                 }
             }
 
-            System.out.println(ANSI_GREEN + "[ClientHandler] Login: " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[ClientHandler] Login: " + username + Colors.RESET);
             return ResponseBuilder.Login.success();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore login: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore login: " + e.getMessage() + Colors.RESET);
             return createError(103, "Errore interno");
         }
     }
@@ -165,11 +152,11 @@ public class ClientHandler implements Runnable {
             PriceNotificationService.unregisterUser(username);
             UDPNotificationService.unregisterClient(username);
 
-            System.out.println(ANSI_GREEN + "[ClientHandler] Logout: " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[ClientHandler] Logout: " + username + Colors.RESET);
             return ResponseBuilder.Logout.success();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore logout: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore logout: " + e.getMessage() + Colors.RESET);
             return createError(101, "Errore interno");
         }
     }
@@ -207,7 +194,7 @@ public class ClientHandler implements Runnable {
             }
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore updateCredentials: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore updateCredentials: " + e.getMessage() + Colors.RESET);
             return ResponseBuilder.UpdateCredentials.otherError("Errore interno");
         }
     }
@@ -237,7 +224,7 @@ public class ClientHandler implements Runnable {
             return ResponseBuilder.TradingOrder.success(orderId);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore insertLimitOrder: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore insertLimitOrder: " + e.getMessage() + Colors.RESET);
             return ResponseBuilder.TradingOrder.error();
         }
     }
@@ -268,7 +255,7 @@ public class ClientHandler implements Runnable {
             return response;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore insertMarketOrder: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore insertMarketOrder: " + e.getMessage() + Colors.RESET);
             return ResponseBuilder.TradingOrder.error();
         }
     }
@@ -300,7 +287,7 @@ public class ClientHandler implements Runnable {
             return response;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore insertStopOrder: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore insertStopOrder: " + e.getMessage() + Colors.RESET);
             return ResponseBuilder.TradingOrder.error();
         }
     }
@@ -328,7 +315,7 @@ public class ClientHandler implements Runnable {
             }
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore cancelOrder: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore cancelOrder: " + e.getMessage() + Colors.RESET);
             return createError(101, "Errore interno");
         }
     }
@@ -363,7 +350,7 @@ public class ClientHandler implements Runnable {
             return historyData;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore getPriceHistory: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore getPriceHistory: " + e.getMessage() + Colors.RESET);
             return createError(103, "Errore interno");
         }
     }
@@ -410,7 +397,7 @@ public class ClientHandler implements Runnable {
             return response;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore registerPriceAlert: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore registerPriceAlert: " + e.getMessage() + Colors.RESET);
             return createError(103, "Errore interno");
         }
     }
@@ -451,9 +438,9 @@ public class ClientHandler implements Runnable {
                 PriceNotificationService.unregisterUser(username);
                 UDPNotificationService.unregisterClient(username);
                 socketUserMap.remove(clientSocket);
-                System.out.println(ANSI_GREEN + "[ClientHandler] Disconnesso: " + username + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[ClientHandler] Disconnesso: " + username + Colors.RESET);
             } else {
-                System.out.println(ANSI_GREEN + "[ClientHandler] Disconnesso: anonimo" + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[ClientHandler] Disconnesso: anonimo" + Colors.RESET);
             }
 
             if (in != null) in.close();
@@ -463,7 +450,7 @@ public class ClientHandler implements Runnable {
             }
 
         } catch (IOException e) {
-            System.err.println(ANSI_RED + "[ClientHandler] Errore cleanup: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[ClientHandler] Errore cleanup: " + e.getMessage() + Colors.RESET);
         }
     }
 }

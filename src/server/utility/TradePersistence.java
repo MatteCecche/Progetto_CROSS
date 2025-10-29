@@ -14,28 +14,16 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import server.OrderManager.Order;
 
-/*
- * Gestisce il salvataggio dei trade nel file StoricoOrdini.json
- */
 public class TradePersistence {
 
-    // File storico con tutti i trade
     private static final String STORICO_FILE = "data/StoricoOrdini.json";
-
-    // Lock per sincronizzazione accesso al file
     private static final ReentrantReadWriteLock ordersLock = new ReentrantReadWriteLock();
-
-    // Configurazione JSON
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException(ANSI_RED + "[TradePersistence] Cartella 'data' non trovata\n" + ANSI_RESET);
+            throw new IOException(Colors.RED + "[TradePersistence] Cartella 'data' non trovata\n" + Colors.RESET);
         }
 
         File storicoFile = new File(STORICO_FILE);
@@ -64,9 +52,9 @@ public class TradePersistence {
                 }
 
             } catch (IOException e) {
-                throw new IOException(ANSI_RED + "[TradePersistence] Errore lettura file: " + e.getMessage() + ANSI_RESET, e);
+                throw new IOException(Colors.RED + "[TradePersistence] Errore lettura file: " + e.getMessage() + Colors.RESET, e);
             } catch (Exception e) {
-                throw new IOException(ANSI_RED + "[TradePersistence] File JSON malformato: " + e.getMessage() + ANSI_RESET, e);
+                throw new IOException(Colors.RED + "[TradePersistence] File JSON malformato: " + e.getMessage() + Colors.RESET, e);
             }
         } finally {
             ordersLock.readLock().unlock();
@@ -118,7 +106,7 @@ public class TradePersistence {
             saveTrades(allTrades);
 
         } catch (Exception e) {
-            throw new IOException(ANSI_RED + "[TradePersistence] Impossibile salvare trade" + ANSI_RESET, e);
+            throw new IOException(Colors.RED + "[TradePersistence] Impossibile salvare trade" + Colors.RESET, e);
         }
     }
 }
