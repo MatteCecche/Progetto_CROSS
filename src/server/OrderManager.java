@@ -21,31 +21,22 @@ import server.orderbook.OrderBook;
 import server.orders.StopOrderManager;
 import server.orders.LimitOrderManager;
 import server.orders.MarketOrderManager;
+import server.utility.Colors;
 
-/*
- * Gestisce gli ordini del sistema di trading
- */
 public class OrderManager {
 
-    // Mappa orderId -> Order
     private static final Map<Integer, Order> allOrders = new ConcurrentHashMap<>();
-
-    // Prezzo corrente di mercato
-    private static volatile int currentMarketPrice = 58000000; // Default: 58.000 USD
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
+    private static volatile int currentMarketPrice = 58000000;
 
     public static class Order {
-        private final int orderId;        // ID univoco
-        private final String username;    // Chi ha creato l'ordine
-        private final String type;        // "bid" (compra) o "ask" (vende)
-        private final String orderType;   // "limit", "market", "stop"
-        private final int size;           // Quantità (in millesimi di BTC)
-        private final int price;          // Prezzo limite
-        private final int stopPrice;      // Prezzo di attivazione (per stop)
-        private int remainingSize;        // Quantità ancora da eseguire
+        private final int orderId;
+        private final String username;
+        private final String type;
+        private final String orderType;
+        private final int size;
+        private final int price;
+        private final int stopPrice;
+        private int remainingSize;
 
         public Order(String username, String type, String orderType, int size, int price, int stopPrice) {
             this.orderId = OrderIdGenerator.getNextOrderId();
@@ -112,7 +103,7 @@ public class OrderManager {
     public static void initialize() throws IOException {
         File dataDir = new File("data");
         if (!dataDir.exists()) {
-            throw new IOException(ANSI_RED + "[OrderManager] Cartella 'data' non trovata\n" + ANSI_RESET);
+            throw new IOException(Colors.RED + "[OrderManager] Cartella 'data' non trovata\n" + Colors.RESET);
         }
 
         TradePersistence.initialize();
@@ -135,11 +126,11 @@ public class OrderManager {
                 return -1;
             }
 
-            System.out.println(ANSI_GREEN + "[OrderManager] Limit order creato: " + order.getOrderId() + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[OrderManager] Limit order creato: " + order.getOrderId() + Colors.RESET);
             return order.getOrderId();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore inserimento limit order: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore inserimento limit order: " + e.getMessage() + Colors.RESET);
             return -1;
         }
     }
@@ -160,11 +151,11 @@ public class OrderManager {
                 return -1;
             }
 
-            System.out.println(ANSI_GREEN + "[OrderManager] Market order creato: " + order.getOrderId() + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[OrderManager] Market order creato: " + order.getOrderId() + Colors.RESET);
             return order.getOrderId();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore inserimento market order: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore inserimento market order: " + e.getMessage() + Colors.RESET);
             return -1;
         }
     }
@@ -177,7 +168,7 @@ public class OrderManager {
 
             // Verifica che lo stop price abbia senso
             if (!StopOrderManager.isValidStopPrice(type, stopPrice, currentMarketPrice)) {
-                System.err.println(ANSI_RED + "[OrderManager] Stop price non valido: " + PriceCalculator.formatPrice(stopPrice) + ANSI_RESET);
+                System.err.println(Colors.RED + "[OrderManager] Stop price non valido: " + PriceCalculator.formatPrice(stopPrice) + Colors.RESET);
                 return -1;
             }
 
@@ -185,11 +176,11 @@ public class OrderManager {
             allOrders.put(order.getOrderId(), order);
             StopOrderManager.addStopOrder(order);
 
-            System.out.println(ANSI_GREEN + "[OrderManager] Stop order creato: " + order.getOrderId() + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[OrderManager] Stop order creato: " + order.getOrderId() + Colors.RESET);
             return order.getOrderId();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore inserimento stop order: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore inserimento stop order: " + e.getMessage() + Colors.RESET);
             return -1;
         }
     }
@@ -223,14 +214,14 @@ public class OrderManager {
 
             if (removed) {
                 allOrders.remove(orderId);
-                System.out.println(ANSI_GREEN + "[OrderManager] Ordine cancellato: " + orderId + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[OrderManager] Ordine cancellato: " + orderId + Colors.RESET);
                 return 100;
             }
 
             return 101;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore cancellazione: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore cancellazione: " + e.getMessage() + Colors.RESET);
             return 101;
         }
     }
@@ -328,7 +319,7 @@ public class OrderManager {
             return response;
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore getPriceHistory: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore getPriceHistory: " + e.getMessage() + Colors.RESET);
 
             JsonObject error = new JsonObject();
             error.addProperty("error", "Errore interno");
@@ -338,7 +329,7 @@ public class OrderManager {
 
     private static void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice) {
         try {
-            System.out.println(ANSI_GREEN + "[OrderManager] TRADE: " + PriceCalculator.formatSize(tradeSize) + " BTC @ " + PriceCalculator.formatPrice(executionPrice) + " USD" + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[OrderManager] TRADE: " + PriceCalculator.formatSize(tradeSize) + " BTC @ " + PriceCalculator.formatPrice(executionPrice) + " USD" + Colors.RESET);
 
             int oldPrice = currentMarketPrice;
             currentMarketPrice = executionPrice;
@@ -351,7 +342,7 @@ public class OrderManager {
             try {
                 UDPNotificationService.notifyTradeExecution(bidOrder, askOrder, tradeSize, executionPrice);
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[OrderManager] Errore notifiche: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[OrderManager] Errore notifiche: " + e.getMessage() + Colors.RESET);
             }
 
             StopOrderManager.checkAndActivateStopOrders(currentMarketPrice, OrderManager::executeTrade);
@@ -359,11 +350,11 @@ public class OrderManager {
             try {
                 TradePersistence.saveExecutedTrade(bidOrder, askOrder, tradeSize, executionPrice);
             } catch (IOException e) {
-                System.err.println(ANSI_RED + "[OrderManager] Errore salvataggio trade: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[OrderManager] Errore salvataggio trade: " + e.getMessage() + Colors.RESET);
             }
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[OrderManager] Errore esecuzione trade: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[OrderManager] Errore esecuzione trade: " + e.getMessage() + Colors.RESET);
         }
     }
 

@@ -10,39 +10,18 @@ import java.net.InetSocketAddress;
 import java.net.MulticastSocket;
 import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
+import server.utility.Colors;
 
-/*
- * Listener per notifiche multicast di soglie prezzo
- */
 public class MulticastListener implements Runnable {
 
     private static final String SEPARATOR = "================================================================================";
-
-    // Socket multicast per ricezione messaggi
     private MulticastSocket multicastSocket;
-
-    // Indirizzo del gruppo come SocketAddress
     private InetSocketAddress groupSocketAddress;
-
-    // Indirizzo e porta del gruppo multicast
     private final String multicastAddress;
     private final int multicastPort;
-
-    // Username dell'utente per logging
     private final String username;
-
-    // Flag per controllo esecuzione thread
     private volatile boolean running;
-
-    // Lock per la stampa su terminale
     private final Object consoleLock;
-
-    // Colori per risposte
-    public static final String ANSI_RESET = "\u001B[0m";
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_YELLOW = "\u001B[33m";
-    public static final String ANSI_BOLD = "\u001B[1m";
 
     public MulticastListener(String multicastAddress, int multicastPort, String username, Object consoleLock) {
         this.multicastAddress = multicastAddress;
@@ -65,7 +44,7 @@ public class MulticastListener implements Runnable {
             running = true;
 
         } catch (IOException e) {
-            System.err.println(ANSI_RED + "Errore avvio: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "Errore avvio: " + e.getMessage() + Colors.RESET);
             throw e;
         }
     }
@@ -83,10 +62,9 @@ public class MulticastListener implements Runnable {
                 processNotification(message);
 
             } catch (SocketTimeoutException e) {
-                // non fa nulla
             } catch (IOException e) {
                 if (running) {
-                    System.err.println(ANSI_RED + "Errore ricezione: " + e.getMessage() + ANSI_RESET);
+                    System.err.println(Colors.RED + "Errore ricezione: " + e.getMessage() + Colors.RESET);
                 }
             }
         }
@@ -112,7 +90,7 @@ public class MulticastListener implements Runnable {
             }
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "Errore processing: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "Errore processing: " + e.getMessage() + Colors.RESET);
         }
     }
 
@@ -123,18 +101,18 @@ public class MulticastListener implements Runnable {
                 int currentPrice = notification.get("currentPrice").getAsInt();
                 String message = notification.get("message").getAsString();
 
-                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
-                System.out.println(ANSI_RED + "                             SOGLIA PREZZO RAGGIUNTA" + ANSI_RESET);
-                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
-                System.out.println(ANSI_GREEN + "  " + message + ANSI_RESET);
-                System.out.println(ANSI_GREEN + "  Soglia impostata : " + formatPrice(thresholdPrice) + " USD" + ANSI_RESET);
-                System.out.println(ANSI_GREEN + "  Prezzo attuale   : " + formatPrice(currentPrice) + " USD" + ANSI_RESET);
-                System.out.println(ANSI_YELLOW + SEPARATOR + ANSI_RESET);
-                System.out.print(ANSI_BOLD + ">> " + ANSI_RESET);
+                System.out.println(Colors.YELLOW + SEPARATOR + Colors.RESET);
+                System.out.println(Colors.RED + "                             SOGLIA PREZZO RAGGIUNTA" + Colors.RESET);
+                System.out.println(Colors.YELLOW + SEPARATOR + Colors.RESET);
+                System.out.println(Colors.GREEN + "  " + message + Colors.RESET);
+                System.out.println(Colors.GREEN + "  Soglia impostata : " + formatPrice(thresholdPrice) + " USD" + Colors.RESET);
+                System.out.println(Colors.GREEN + "  Prezzo attuale   : " + formatPrice(currentPrice) + " USD" + Colors.RESET);
+                System.out.println(Colors.YELLOW + SEPARATOR + Colors.RESET);
+                System.out.print(Colors.BOLD + ">> " + Colors.RESET);
                 System.out.flush();
 
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "Errore display: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "Errore display: " + e.getMessage() + Colors.RESET);
             }
         }
     }
@@ -150,7 +128,7 @@ public class MulticastListener implements Runnable {
                 multicastSocket.close();
             }
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "Errore stop: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "Errore stop: " + e.getMessage() + Colors.RESET);
         }
     }
 

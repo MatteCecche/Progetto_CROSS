@@ -16,45 +16,27 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ScheduledExecutorService;
 
 import server.utility.UserManager;
+import server.utility.Colors;
 
-/*
- * Server principale del sistema CROSS
- */
 public class ServerMain {
 
-    // Flag volatile per terminazione del server
     private static volatile boolean running = true;
-
-    // Socket principale per connessioni TCP dei client
     private static ServerSocket serverSocket;
-
-    // Thread pool per gestire i client
     private static ExecutorService pool;
-
-    // Associazione socket dell'utente al suo username
     private static final ConcurrentHashMap<Socket, String> socketUserMap = new ConcurrentHashMap<>();
-
-    // Thread separato per ascoltare comandi da terminale
     private static Thread terminalListener;
-
-    // Esecuzione periodica del salvataggio dati
     private static ScheduledExecutorService persistenceScheduler;
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
-    public static final String ANSI_CYAN = "\u001B[36m";
 
 
     public static void main(String[] args) {
         System.out.println();
-        System.out.println(ANSI_CYAN + "==================== Avvio Server CROSS =====================" + ANSI_RESET);
+        System.out.println(Colors.CYAN + "==================== Avvio Server CROSS =====================" + Colors.RESET);
 
         Properties config;
         try {
             config = loadConfiguration();
         } catch (IOException e) {
-            System.err.println(ANSI_RED + "[Server] Impossibile caricare configurazione: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[Server] Impossibile caricare configurazione: " + e.getMessage() + Colors.RESET);
             System.exit(1);
             return;
         }
@@ -72,7 +54,7 @@ public class ServerMain {
             multicastAddress = parseRequiredStringProperty(config, "multicast.address");
             multicastPort = parseRequiredIntProperty(config, "multicast.port");
         } catch (IllegalArgumentException e) {
-            System.err.println(ANSI_RED + "[Server] Errore parsing configurazione: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[Server] Errore parsing configurazione: " + e.getMessage() + Colors.RESET);
             System.exit(1);
             return;
         }
@@ -88,7 +70,7 @@ public class ServerMain {
             UDPNotificationService.initialize();
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[Server] Errore avvio servizi: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[Server] Errore avvio servizi: " + e.getMessage() + Colors.RESET);
             e.printStackTrace();
             System.exit(1);
         }
@@ -96,7 +78,7 @@ public class ServerMain {
         try {
             startTCPServer(tcpPort, socketTimeout);
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[Server] Errore avvio TCP: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[Server] Errore avvio TCP: " + e.getMessage() + Colors.RESET);
             System.exit(1);
         } finally {
             shutdownServer();
@@ -108,7 +90,7 @@ public class ServerMain {
         File configFile = new File("src/server/server.properties");
 
         if (!configFile.exists()) {
-            throw new IOException(ANSI_RED + "File configurazione non trovato: " + configFile.getPath() + ANSI_RESET);
+            throw new IOException(Colors.RED + "File configurazione non trovato: " + configFile.getPath() + Colors.RESET);
         }
 
         try (FileReader reader = new FileReader(configFile)) {
@@ -132,7 +114,7 @@ public class ServerMain {
             try {
                 UserManager.saveAllUsers();
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[Server] Errore persistenza: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[Server] Errore persistenza: " + e.getMessage() + Colors.RESET);
             }
         }, intervalMinutes, intervalMinutes, TimeUnit.MINUTES);
     }
@@ -150,16 +132,15 @@ public class ServerMain {
                 Socket clientSocket = serverSocket.accept();
                 clientSocket.setSoTimeout(socketTimeout);
 
-                System.out.println(ANSI_GREEN + "[Server] Nuova connessione: " + clientSocket.getRemoteSocketAddress() + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[Server] Nuova connessione: " + clientSocket.getRemoteSocketAddress() + Colors.RESET);
 
                 ClientHandler handler = new ClientHandler(clientSocket, socketUserMap);
                 pool.submit(handler);
 
             } catch (java.net.SocketTimeoutException e) {
-                // non fare nulla
             } catch (IOException e) {
                 if (running) {
-                    System.err.println(ANSI_RED + "[Server] Errore connessione client: " + e.getMessage() + ANSI_RESET);
+                    System.err.println(Colors.RED + "[Server] Errore connessione client: " + e.getMessage() + Colors.RESET);
                 }
             }
         }
@@ -167,7 +148,7 @@ public class ServerMain {
 
     private static void listenForTerminalCommands() {
         Scanner scanner = new Scanner(System.in);
-        System.out.println(ANSI_CYAN + "=============== Digitare 'esci' per terminare ===============" + ANSI_RESET);
+        System.out.println(Colors.CYAN + "=============== Digitare 'esci' per terminare ===============" + Colors.RESET);
 
         while (running) {
             try {
@@ -182,11 +163,11 @@ public class ServerMain {
                     break;
 
                 } else if (!command.isEmpty()) {
-                    System.out.println(ANSI_RED + "[Server] Comando non riconosciuto" + ANSI_RESET);
+                    System.out.println(Colors.RED + "[Server] Comando non riconosciuto" + Colors.RESET);
                 }
             } catch (Exception e) {
                 if (running) {
-                    System.err.println(ANSI_RED + "[Server] Errore lettura comando: " + e.getMessage() + ANSI_RESET);
+                    System.err.println(Colors.RED + "[Server] Errore lettura comando: " + e.getMessage() + Colors.RESET);
                 }
             }
         }
@@ -201,9 +182,9 @@ public class ServerMain {
             // Salvataggio finale
             try {
                 UserManager.saveAllUsers();
-                System.out.println(ANSI_GREEN + "[Server] Dati salvati" + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[Server] Dati salvati" + Colors.RESET);
             } catch (Exception e) {
-                System.err.println(ANSI_RED + "[Server] Errore salvataggio: " + e.getMessage() + ANSI_RESET);
+                System.err.println(Colors.RED + "[Server] Errore salvataggio: " + e.getMessage() + Colors.RESET);
             }
 
             // Chiusura scheduler persistenza
@@ -235,12 +216,12 @@ public class ServerMain {
             UDPNotificationService.shutdown();
             socketUserMap.clear();
 
-            System.out.println(ANSI_CYAN + "=================== Chiusura Server CROSS ===================" + ANSI_RESET);
+            System.out.println(Colors.CYAN + "=================== Chiusura Server CROSS ===================" + Colors.RESET);
             System.out.println();
             System.exit(0);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[Server] Errore shutdown: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[Server] Errore shutdown: " + e.getMessage() + Colors.RESET);
             System.exit(1);
         }
     }
@@ -249,13 +230,13 @@ public class ServerMain {
         String value = props.getProperty(key);
 
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException(ANSI_RED + "Parametro mancante: " + key + ANSI_RESET);
+            throw new IllegalArgumentException(Colors.RED + "Parametro mancante: " + key + Colors.RESET);
         }
 
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException(ANSI_RED + "Valore non valido per " + key + ": " + value + ANSI_RESET);
+            throw new IllegalArgumentException(Colors.RED + "Valore non valido per " + key + ": " + value + Colors.RESET);
         }
     }
 
@@ -263,7 +244,7 @@ public class ServerMain {
         String value = props.getProperty(key);
 
         if (value == null || value.trim().isEmpty()) {
-            throw new IllegalArgumentException(ANSI_RED + "Parametro mancante: " + key + ANSI_RESET);
+            throw new IllegalArgumentException(Colors.RED + "Parametro mancante: " + key + Colors.RESET);
         }
 
         return value.trim();

@@ -8,18 +8,11 @@ import java.util.List;
 import java.util.Map;
 
 import server.OrderManager.Order;
+import server.utility.Colors;
 
-/*
- * Implementa l'algoritmo di matching degli ordini
- */
 public class MatchingEngine {
 
-    // Lock statico per sincronizzare operazioni di matching
     private static final Object MATCHING_LOCK = new Object();
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public interface TradeExecutor {
         void executeTrade(Order bidOrder, Order askOrder, int tradeSize, int executionPrice);
@@ -50,7 +43,7 @@ public class MatchingEngine {
                 int tradeSize = Math.min(bidOrder.getRemainingSize(), askOrder.getRemainingSize());
                 int executionPrice = bestAskPrice;
 
-                System.out.println(ANSI_GREEN + "[MatchingEngine] Match: Order " + bidOrder.getOrderId() + " <-> " + askOrder.getOrderId() + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[MatchingEngine] Match: Order " + bidOrder.getOrderId() + " <-> " + askOrder.getOrderId() + Colors.RESET);
 
                 if (tradeExecutor != null) {
                     tradeExecutor.executeTrade(bidOrder, askOrder, tradeSize, executionPrice);
@@ -77,18 +70,18 @@ public class MatchingEngine {
             }
 
             if (tradesExecuted > 0) {
-                System.out.println(ANSI_GREEN + "[MatchingEngine] Eseguiti " + tradesExecuted + " trade" + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[MatchingEngine] Eseguiti " + tradesExecuted + " trade" + Colors.RESET);
             }
         }
     }
 
     public static boolean executeMarketOrder(Order marketOrder, TradeExecutor tradeExecutor) {
         if (!"market".equals(marketOrder.getOrderType())) {
-            throw new IllegalArgumentException(ANSI_RED + "Solo Market Orders" + ANSI_RESET);
+            throw new IllegalArgumentException(Colors.RED + "Solo Market Orders" + Colors.RESET);
         }
 
         synchronized (MATCHING_LOCK) {
-            System.out.println(ANSI_GREEN + "[MatchingEngine] Esecuzione Market Order " + marketOrder.getOrderId() + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[MatchingEngine] Esecuzione Market Order " + marketOrder.getOrderId() + Colors.RESET);
 
             String oppositeType = "bid".equals(marketOrder.getType()) ? "ask" : "bid";Map<Integer, LinkedList<Order>> oppositeBook = "ask".equals(oppositeType) ? OrderBook.getAskOrdersMap() : OrderBook.getBidOrdersMap();
 
@@ -136,7 +129,7 @@ public class MatchingEngine {
             int executedSize = initialSize - remainingSize;
             boolean fullyExecuted = remainingSize <= 0;
 
-            System.out.println(ANSI_GREEN + "[MatchingEngine] Market Order eseguito: " + executedSize + " di " + initialSize + (fullyExecuted ? " (completo)" : " (parziale)") + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[MatchingEngine] Market Order eseguito: " + executedSize + " di " + initialSize + (fullyExecuted ? " (completo)" : " (parziale)") + Colors.RESET);
 
             return fullyExecuted;
         }

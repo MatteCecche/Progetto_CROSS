@@ -11,30 +11,19 @@ import java.net.InetSocketAddress;
 import java.util.concurrent.ConcurrentHashMap;
 
 import server.OrderManager.Order;
+import server.utility.Colors;
 
-/*
- * Gestisce le notifiche UDP ai client quando i trade vengono eseguiti
- */
 public class UDPNotificationService {
 
-    // Socket UDP per invio notifiche
     private static DatagramSocket udpSocket;
-
-    // Mappa username -> indirizzo UDP client
     private static final ConcurrentHashMap<String, InetSocketAddress> clientAddresses = new ConcurrentHashMap<>();
-
-    // Inizializzazione JSON
     private static final Gson gson = new Gson();
-
-    public static final String ANSI_RED = "\u001B[31m";
-    public static final String ANSI_GREEN = "\u001B[32m";
-    public static final String ANSI_RESET = "\u001B[0m";
 
     public static void initialize() throws IOException {
         try {
             udpSocket = new DatagramSocket();
         } catch (Exception e) {
-            throw new IOException(ANSI_RED + "[UDPNotification] Impossibile inizializzare servizio UDP" + ANSI_RESET, e);
+            throw new IOException(Colors.RED + "[UDPNotification] Impossibile inizializzare servizio UDP" + Colors.RESET, e);
         }
     }
 
@@ -44,12 +33,12 @@ public class UDPNotificationService {
         }
 
         clientAddresses.put(username, address);
-        System.out.println(ANSI_GREEN + "[UDPNotification] Client registrato: " + username + ANSI_RESET);
+        System.out.println(Colors.GREEN + "[UDPNotification] Client registrato: " + username + Colors.RESET);
     }
 
     public static void unregisterClient(String username) {
         if (clientAddresses.remove(username) != null) {
-            System.out.println(ANSI_GREEN + "[UDPNotification] Client rimosso: " + username + ANSI_RESET);
+            System.out.println(Colors.GREEN + "[UDPNotification] Client rimosso: " + username + Colors.RESET);
         }
     }
 
@@ -63,7 +52,7 @@ public class UDPNotificationService {
             sendNotification(askOrder.getUsername(), askNotification);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[UDPNotification] Errore invio notifiche: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[UDPNotification] Errore invio notifiche: " + e.getMessage() + Colors.RESET);
         }
     }
 
@@ -105,7 +94,7 @@ public class UDPNotificationService {
             udpSocket.send(packet);
 
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[UDPNotification] Errore invio a " + username + ": " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[UDPNotification] Errore invio a " + username + ": " + e.getMessage() + Colors.RESET);
         }
     }
 
@@ -113,10 +102,10 @@ public class UDPNotificationService {
         try {
             if (udpSocket != null && !udpSocket.isClosed()) {
                 udpSocket.close();
-                System.out.println(ANSI_GREEN + "[UDPNotification] Servizio chiuso" + ANSI_RESET);
+                System.out.println(Colors.GREEN + "[UDPNotification] Servizio chiuso" + Colors.RESET);
             }
         } catch (Exception e) {
-            System.err.println(ANSI_RED + "[UDPNotification] Errore shutdown: " + e.getMessage() + ANSI_RESET);
+            System.err.println(Colors.RED + "[UDPNotification] Errore shutdown: " + e.getMessage() + Colors.RESET);
         }
 
         clientAddresses.clear();
