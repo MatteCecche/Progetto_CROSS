@@ -1,0 +1,17 @@
+Compilazione Linux/MacOs
+javac -d bin -cp "lib/*" src/**/*.java
+
+Esecuzione
+java -cp "bin:src:lib/*" server.ServerMain
+java -cp "bin:src:lib/*" client.ClientMain
+
+Compilazione windows
+mkdir out
+
+dir /s /B src\*.java > sources.txt
+javac -d out -cp "lib\gson-2.11.0.jar" @sources.txt
+del sources.txt
+
+Esecuzione
+java -cp "out;src;lib\gson-2.11.0.jar" server.ServerMain
+java -cp "out;src;lib\gson-2.11.0.jar" client.ClientMain
